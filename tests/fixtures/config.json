@@ -1,0 +1,6 @@
+{
+  "decisions": ["decisions.md"],
+  "pipeline": ["pipeline.md"],
+  "tasks": ["tasks.json"],
+  "ships": ["ships.md", "missing-*.md"]
+}
