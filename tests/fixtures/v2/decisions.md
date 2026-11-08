@@ -1,0 +1,2 @@
+- 2026-11-09 · session: abc12345 · applies: [wake-up] · from: unknown · kind: standing · paper-first · Sam (09:00 "paper first") → Put the paper first · Why: Sam reads it first
+- 2026-11-09 · session: abc12345 · applies: [gazeta] · from: gazeta · kind: standing · front-page-rule · Sam (09:05 "one page") → One page only · Why: fits the phone

@@ -1,0 +1,625 @@
+#!/usr/bin/env python3
+# work-map — Copyright (c) 2026 House of Solance. PolyForm Noncommercial 1.0.0. Required Notice: Copyright (c) 2026 House of Solance (https://github.com/SolanceLab)
+"""work-map: read tagged lines (decisions, pipeline, tasks, ships) and link them into a graph.
+
+Python 3.9+, standard library only. Reads files only; writes nothing.
+Run:  python3 work_map.py --config <file> <index|query|open|slice|inventory> [--json]
+"""
+import argparse
+import glob
+import json
+import os
+import re
+import sys
+
+WAITING = re.compile(r"waiting(-on-[a-z0-9][a-z0-9-]*)?")
+PLURAL = {"decision": "decisions", "pipeline": "pipeline", "task": "tasks", "ship": "ships", "project": "projects"}
+SEP = " · "
+DATE = r"\d{4}-\d{2}-\d{2}"
+OPEN_STATUSES = {"idea", "planned", "building", "open", "standing", "waiting", "live"}
+KINDS = ("decisions", "pipeline", "tasks", "ships")
+
+
+def is_waiting(status):
+    """True for "waiting" and "waiting-on-<name>"."""
+    return bool(WAITING.fullmatch(status or ""))
+LINK_TYPES = ("in-session", "applies-to", "from", "belongs-to", "done-by", "depends-on")
+
+
+class ConfigError(Exception):
+    pass
+
+
+def slugify(text):
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+
+
+def split_fields(text):
+    return [f.strip() for f in text.split(SEP) if f.strip()]
+
+
+def tag(field):
+    """('session', 'abc') for 'session: abc', else None."""
+    m = re.match(r"^([a-z][a-z ]*?):\s*(.*)$", field)
+    return (m.group(1), m.group(2).strip()) if m else None
+
+
+def csv(value):
+    value = value.strip().strip("[]")
+    return [v.strip() for v in value.split(",") if v.strip() and v.strip().lower() not in ("none", "unknown")]
+
+
+def record(kind, id_, source, **kw):
+    r = {"kind": kind, "id": id_, "project": "unknown", "session": "unknown",
+         "status": "", "date": "", "gist": "", "text": "", "source": source, "links": []}
+    r.update(kw)
+    return r
+
+
+def add_link(r, type_, target):
+    r["links"].append((type_, target))
+
+
+# ---- parsers: one per kind, each returns a record or None for a line ----
+
+def parse_decision(line, source):
+    m = re.match(r"^\s*-\s+(%s)\b(.*)$" % DATE, line)
+    if not m:
+        return None
+    r = record("decision", "", source, date=m.group(1))
+    applies, frm, slug = [], "", ""
+    for f in split_fields(m.group(2)):
+        t = tag(f)
+        if f.lower().startswith("why:"):
+            r["why"] = f[4:].strip()
+        elif "→" in f:
+            who, call = f.split("→", 1)
+            r["who"], r["call"] = who.strip(), call.strip()
+        elif t and t[0] == "session":
+            r["session"] = t[1] or "unknown"
+        elif t and t[0] == "applies":
+            applies = csv(t[1])
+        elif t and t[0] == "from":
+            frm = "" if t[1].strip().lower() in ("", "unknown", "none") else t[1]
+        elif t and t[0] == "kind":
+            r["weight"] = t[1].strip()
+        elif not slug and not t:
+            slug = f
+    r["call"] = r.get("call", "")
+    r["why"] = r.get("why", "")
+    r["slug"] = slugify(slug) if slug else slugify(r["call"])[:40]
+    r["id"] = "decision:" + r["slug"]
+    r["applies"], r["from"] = applies, frm
+    r["project"] = frm or (applies[0] if applies else "unknown")
+    r["status"] = "standing"
+    r["gist"] = r["call"] or r.get("who", "")
+    r["text"] = " ".join([r["slug"], r.get("who", ""), r["call"], r["why"]])
+    for p in applies:
+        add_link(r, "applies-to", "project:" + p)
+    if frm:
+        add_link(r, "from", "project:" + frm)
+    return r
+
+
+ITEM = re.compile(r"^-\s+\*\*(.+?)\*\*(.*)$")
+DETAIL = re.compile(r"^\s+-\s+(.*\S)\s*$")
+
+
+def scan_items(text):
+    """[(line_no, title, rest, details)] for column-0 bold item lines; indented '- ' lines under one are its details."""
+    out, cur = [], None
+    for n, line in enumerate(text.splitlines(), 1):
+        m = ITEM.match(line)
+        if m:
+            cur = (n, m.group(1).strip(), m.group(2), [])
+            out.append(cur)
+        elif not line.strip():
+            continue
+        elif line[0] in " \t":
+            d = DETAIL.match(line)
+            if d and cur is not None:
+                cur[3].append(d.group(1))
+        else:
+            cur = None  # a heading or any other column-0 line ends the item
+    return out
+
+
+def parse_pipeline_file(text, source_name, default_project="unknown"):
+    out = []
+    for n, title, rest, details in scan_items(text):
+        tags, bare = {}, []
+        for f in split_fields(rest):
+            t = tag(f)
+            if t and t[0] in ("project", "session", "status", "spec", "id", "why", "decisions", "devlog"):
+                tags[t[0]] = t[1]
+            else:
+                bare.append(f)
+        project = tags.get("project") or default_project
+        item_id = tags.get("id") or slugify(title)
+        why = tags.get("why", "")
+        decisions = csv(tags.get("decisions", ""))
+        r = record("pipeline", "pipeline:%s/%s" % (project, item_id), (source_name, n),
+                   project=project, session=tags.get("session") or "unknown",
+                   status=tags.get("status") or "unknown", gist=why or " · ".join(bare) or title)
+        r["title"], r["spec"], r["why"] = title, tags.get("spec", "none"), why
+        r["decisions"], r["devlog"], r["details"] = decisions, tags.get("devlog", ""), details
+        r["text"] = " ".join([title, why] + bare + details)
+        if project != "unknown":
+            add_link(r, "belongs-to", "project:" + project)
+        for d in decisions:
+            add_link(r, "depends-on", "decision:" + slugify(d))
+        out.append(r)
+    return out
+
+
+def parse_map_file(text, source_name):
+    out = []
+    for n, name, rest, details in scan_items(text):
+        tags = {}
+        for f in split_fields(rest):
+            t = tag(f)
+            if t and t[0] in ("id", "status", "aka", "why"):
+                tags[t[0]] = t[1]
+        pid = tags.get("id") or slugify(name)
+        why = tags.get("why", "")
+        r = record("project", "project:" + pid, (source_name, n), project=pid,
+                   status=tags.get("status") or "unknown", gist=why or name)
+        r["title"], r["why"], r["aka"], r["details"] = name, why, csv(tags.get("aka", "")), details
+        r["text"] = " ".join([name, why] + r["aka"] + details)
+        out.append(r)
+    return out
+
+
+def parse_ship(line, source):
+    m = re.match(r"^\s*(?:-\s+)?(%s)\b(.*)$" % DATE, line)
+    if not m or not re.search(r"(^|·)\s*shipped\b", m.group(2)):
+        return None
+    r = record("ship", "", source, date=m.group(1), status="shipped")
+    decisions, tasks, repo, version, sha = [], [], "unknown", "", ""
+    for f in split_fields(m.group(2)):
+        t = tag(f)
+        if f.startswith("shipped"):
+            toks = f.split()[1:]
+            if len(toks) >= 2:
+                version, sha = toks[0], toks[1]
+            elif len(toks) == 1:
+                if re.fullmatch(r"[0-9a-f]{7,40}", toks[0]):
+                    sha = toks[0]
+                else:
+                    version = toks[0]
+        elif t and t[0] == "session":
+            r["session"] = t[1] or "unknown"
+        elif t and t[0] == "project":
+            repo = t[1] or "unknown"
+        elif t and t[0] == "decisions":
+            decisions = csv(t[1])
+        elif t and t[0] == "tasks closed":
+            tasks = csv(t[1])
+    ref = version or sha or "unknown"
+    r["id"] = "ship:%s@%s" % (repo, ref)
+    r["project"] = repo
+    r["version"], r["sha"] = version, sha
+    r["gist"] = ("shipped %s %s" % (version, sha)).strip()
+    r["text"] = " ".join([r["gist"], " ".join(decisions), " ".join(tasks)])
+    for d in decisions:
+        add_link(r, "depends-on", "decision:" + slugify(d))
+    for k in tasks:
+        add_link(r, "done-by", "task:" + k)
+    return r
+
+
+LINE_PARSERS = {"decisions": parse_decision, "ships": parse_ship}
+
+
+def parse_tasks(text, source_name):
+    data = json.loads(text)
+    if isinstance(data, dict):
+        data = data.get("tasks", data.get("items", []))
+    if not isinstance(data, list):
+        raise ValueError("expected a JSON list of task objects")
+    out = []
+    pos = 0  # search from the previous match so duplicate ids get their own lines
+    for obj in data:
+        if not isinstance(obj, dict) or "id" not in obj or "title" not in obj:
+            continue
+        tid = str(obj["id"])
+        decs = obj.get("decisions") or []
+        if not isinstance(decs, list):
+            raise ValueError("task %s: 'decisions' must be a list" % tid)
+        m = re.compile(r'"id"\s*:\s*"?%s"?\s*[,}\n]' % re.escape(tid)).search(text, pos)
+        if m:
+            pos = m.end()
+        line = text.count("\n", 0, m.start()) + 1 if m else 1
+        project = str(obj.get("project") or "unknown")
+        r = record("task", "task:" + tid, (source_name, line), project=project,
+                   session=str(obj.get("session") or "unknown"),
+                   status=str(obj.get("status") or "open"), gist=str(obj["title"]),
+                   text=str(obj["title"]), date=str(obj.get("date") or ""))
+        if project != "unknown":
+            add_link(r, "belongs-to", "project:" + project)
+        for d in decs:
+            add_link(r, "depends-on", "decision:" + slugify(str(d)))
+        out.append(r)
+    return out
+
+
+# ---- config and loading ----
+
+def load_config(path):
+    if not path:
+        raise ConfigError("no config: pass --config <file> or set WORK_MAP_CONFIG")
+    try:
+        with open(path, "rb") as fh:
+            raw = fh.read()
+    except OSError as e:
+        raise ConfigError("cannot read config %s: %s" % (path, e.strerror))
+    try:
+        if path.endswith(".toml"):
+            import tomllib  # Python 3.11+
+            cfg = tomllib.loads(raw.decode("utf-8"))
+        else:
+            cfg = json.loads(raw.decode("utf-8"))
+    except Exception as e:
+        raise ConfigError("cannot parse config %s: %s" % (path, e))
+    if not isinstance(cfg, dict):
+        raise ConfigError("config must be an object with keys: " + ", ".join(KINDS + ("map",)))
+    sources = {}
+    for k in KINDS + ("map",):
+        v = cfg.get(k, [])
+        if isinstance(v, str):
+            v = [v]
+        if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+            raise ConfigError("config key %r must be a list of file paths or globs" % k)
+        sources[k] = v
+    if not any(sources.values()):
+        raise ConfigError("config lists no sources (keys: %s)" % ", ".join(KINDS + ("map",)))
+    return sources, os.path.dirname(os.path.abspath(path))
+
+
+def load_all(sources, base):
+    records, files, excluded = [], [], []
+    for kind in KINDS + ("map",):
+        for pattern in sources.get(kind, []):
+            pat = pattern if os.path.isabs(pattern) else os.path.join(base, pattern)
+            paths = sorted(glob.glob(pat, recursive=True))
+            if not paths:
+                excluded.append({"file": pattern, "kind": kind, "reason": "no file matches"})
+            for p in paths:
+                name = os.path.relpath(p, base)
+                if os.path.isdir(p):
+                    excluded.append({"file": name, "kind": kind, "reason": "is a folder"})
+                    continue
+                try:
+                    with open(p, encoding="utf-8") as fh:
+                        text = fh.read()
+                except (OSError, UnicodeDecodeError) as e:
+                    why = "not readable text" if isinstance(e, UnicodeDecodeError) else e.strerror
+                    excluded.append({"file": name, "kind": kind, "reason": why})
+                    continue
+                try:
+                    if kind == "tasks":
+                        recs = parse_tasks(text, name)
+                    elif kind == "map":
+                        recs = parse_map_file(text, name)
+                    elif kind == "pipeline":
+                        # shortcut: folder name is the project only for files below the config folder (the config
+                        # folder's own PIPELINE.md stays "unknown"); upgrade: a config key naming the root file
+                        parent = os.path.dirname(os.path.abspath(p))
+                        folder = os.path.basename(parent) if parent != os.path.abspath(base) else "unknown"
+                        recs = parse_pipeline_file(text, name, folder)
+                    else:
+                        recs = []
+                        for n, line in enumerate(text.splitlines(), 1):
+                            r = LINE_PARSERS[kind](line, (name, n))
+                            if r:
+                                recs.append(r)
+                except ValueError as e:  # includes JSON decode errors
+                    excluded.append({"file": name, "kind": kind, "reason": "bad content: %s" % e})
+                    continue
+                records.extend(recs)
+                files.append({"file": name, "kind": kind, "indexed": len(recs)})
+    return records, files, excluded
+
+
+# ---- graph ----
+
+def build_graph(records):
+    for i, r in enumerate(records):
+        r["seq"] = i
+    # an old project name (aka) resolves to the project's id; the first claim on a name wins
+    alias_of, problems = {}, []
+    project_ids = {r["id"] for r in records if r["kind"] == "project"}
+    for r in records:
+        for a in r["aka"] if r["kind"] == "project" else []:
+            if "project:" + a in project_ids:
+                continue
+            if alias_of.get(a, r["id"]) != r["id"]:
+                problems.append({"type": "alias-collision", "alias": a, "kept": alias_of[a], "also-claimed-by": r["id"]})
+            else:
+                alias_of[a] = r["id"]
+    for r in records:
+        fixed = []
+        for t, x in r["links"]:
+            if x.startswith("project:") and x[8:] in alias_of:
+                x = alias_of[x[8:]]  # alias_of holds the full project id
+            fixed.append((t, x))
+        r["links"] = fixed
+        # slice filters on project/applies names, so an old name resolves there too
+        canon = lambda n: alias_of[n][8:] if n in alias_of else n
+        if r["kind"] == "pipeline" and canon(r["project"]) != r["project"]:
+            r["id"] = "pipeline:%s/%s" % (canon(r["project"]), r["id"].split("/", 1)[1])  # id follows the canonical project
+        r["project"] = canon(r["project"])
+        r["applies"] = [canon(n) for n in r.get("applies", [])]
+    nodes = {}
+    for r in records:
+        nodes.setdefault(r["id"], []).append(r)
+        if r["session"] != "unknown":
+            add_link(r, "in-session", "session:" + r["session"])
+    # project/session nodes exist because a tag names them
+    implicit = set()
+    for r in records:
+        for _, target in r["links"]:
+            if target.startswith(("project:", "session:")):
+                implicit.add(target)
+    inbound = {}
+    unresolved_by_file = {}
+    for r in records:
+        resolved = []
+        for type_, target in r["links"]:
+            if target not in nodes and target not in implicit:
+                resolved.append((type_, "unresolved:" + target))
+                key = r["source"][0]
+                unresolved_by_file[key] = unresolved_by_file.get(key, 0) + 1
+            else:
+                resolved.append((type_, target))
+                inbound.setdefault(target, []).append((type_, r["id"]))
+        r["links"] = resolved
+    collisions = {i: len(v) for i, v in nodes.items() if len(v) > 1}
+    return nodes, implicit, inbound, collisions, unresolved_by_file, problems
+
+
+# ---- output ----
+
+def links_text(r):
+    groups = {}
+    for type_, target in r["links"]:
+        groups.setdefault(type_, []).append(target)
+    parts = ["%s=%s" % (t, ",".join(groups[t][:5])) for t in LINK_TYPES if t in groups]
+    return "; ".join(parts) or "none"
+
+
+def public(r, full=False):
+    d = {k: r[k] for k in ("kind", "id", "project", "session", "status", "date", "gist")}
+    d["source"] = {"file": r["source"][0], "line": r["source"][1]}
+    links = {}
+    for type_, target in r["links"]:
+        links.setdefault(type_, []).append(target)
+    d["links"] = links if full else {t: v[:5] for t, v in links.items()}
+    if full:
+        d.update({k: r[k] for k in ("title", "why", "spec", "decisions", "devlog", "aka", "details") if r.get(k)})
+    return d
+
+
+def one_line(r):
+    gist = r["gist"] if len(r["gist"]) <= 80 else r["gist"][:77] + "..."
+    return "%s %s · %s · %s · %s · links: %s · source: %s:L%d" % (
+        r["kind"], r["id"], r["project"], r["status"] if r["kind"] != "decision" else r["date"] or r["status"],
+        gist, links_text(r), r["source"][0], r["source"][1])
+
+
+def emit(args, payload, lines):
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print("\n".join(lines))
+
+
+def counts(records):
+    c = {k: 0 for k in ("decision", "pipeline", "task", "ship", "project")}
+    for r in records:
+        c[r["kind"]] += 1
+    return c
+
+
+# ---- commands ----
+
+def cmd_index(args, g):
+    records, files, excluded, graph = g
+    c = counts(records)
+    payload = {"counts": c, "total": len(records), "files": len(files), "excluded": len(excluded)}
+    emit(args, payload, ["%s: %d" % (PLURAL[k], v) for k, v in c.items()] +
+         ["total: %d from %d files (%d excluded)" % (len(records), len(files), len(excluded))])
+
+
+def cmd_query(args, g):
+    records = g[0]
+    words = [w.lower() for w in args.text.split()]
+    hits = []
+    for r in records:
+        hay = " ".join([r["id"], r["project"], r["session"], r["gist"], r["text"]]).lower()
+        if all(w in hay for w in words):
+            hits.append(r)
+    emit(args, [public(r) for r in hits], [one_line(r) for r in hits] or ["no match"])
+
+
+def canonical_name(records, name):
+    """An old project name (aka) given on the command line means the project's id; first claim wins, as in build_graph."""
+    if any(r["kind"] == "project" and r["id"] == "project:" + name for r in records):
+        return name  # a real id is never an alias
+    for r in records:
+        if r["kind"] == "project" and name in r.get("aka", []):
+            return r["id"][8:]
+    return name
+
+
+def cmd_open(args, g):
+    records, graph = g[0], g[3]
+    if args.id.startswith("project:"):
+        args.id = "project:" + canonical_name(records, args.id[8:])
+    nodes, implicit, inbound = graph[0], graph[1], graph[2]
+    items = [r for r in records if r["id"] == args.id]
+    if not items and args.id not in implicit:
+        emit(args, {"id": args.id, "found": False}, ["not found: " + args.id])
+        return 1
+    refs = [{"type": t, "from": i} for t, i in inbound.get(args.id, [])]
+    payload = {"id": args.id, "found": True, "items": [public(r, True) for r in items],
+               "linked-from": refs}
+    members = [nodes[i][0] for t, i in inbound.get(args.id, []) if t == "belongs-to" and i.startswith("pipeline:")]
+    if args.id.startswith("project:"):
+        payload["project-items"] = [{"id": m["id"], "title": m["title"], "status": m["status"]} for m in members]
+    lines = []
+    for r in items:
+        lines += ["%s %s" % (r["kind"], r["id"]),
+                  "  project: %s · session: %s · status: %s · date: %s" % (
+                      r["project"], r["session"], r["status"], r["date"] or "-"),
+                  "  text: %s" % r["gist"]]
+        for k in ("who", "call", "why", "spec", "devlog"):
+            if r.get(k) and not (k == "spec" and r[k] == "none"):
+                lines.append("  %s: %s" % (k, r[k]))
+        if r.get("aka"):
+            lines.append("  aka: %s" % ", ".join(r["aka"]))
+        if r.get("decisions"):
+            lines.append("  decisions: %s" % ", ".join(r["decisions"]))
+        for d in r.get("details", []):
+            lines.append("  detail: %s" % d)
+        for type_, target in r["links"]:
+            lines.append("  %s -> %s" % (type_, target))
+        lines.append("  source: %s:L%d" % r["source"])
+    if not items:
+        lines.append("%s (named by tags only)" % args.id)
+    for m in members if args.id.startswith("project:") else []:
+        lines.append("  item: %s · %s · %s" % (m["id"], m["title"], m["status"]))
+    for t, i in inbound.get(args.id, []):
+        lines.append("  linked-from: %s (%s)" % (i, t))
+    emit(args, payload, lines)
+    return 0
+
+
+def applies_to(r, project, house):
+    if house:
+        return "house" in r.get("applies", []) or r["project"] == "house"
+    return r["project"] == project or project in r.get("applies", []) or "house" in r.get("applies", [])
+
+
+def cmd_slice(args, g):
+    records = g[0]
+    if not args.house and not args.project:
+        print("slice needs --project <name> or --house", file=sys.stderr)
+        return 2
+    if args.project:
+        args.project = canonical_name(records, args.project)
+    # House slices retain their original filtering, ordering, and limit semantics.
+    if args.house:
+        out = []
+        for r in records:
+            if not applies_to(r, args.project, True):
+                continue
+            if args.status == "open" and not (r["status"] in OPEN_STATUSES or is_waiting(r["status"])):
+                continue
+            if args.status not in ("open", "any") and r["status"] != args.status:
+                continue
+            out.append(r)
+        out.sort(key=lambda r: (r["date"], r["seq"]), reverse=True)
+        out = out[:args.limit]
+        emit(args, [public(r) for r in out], [one_line(r) for r in out] or ["nothing open"])
+        return 0
+
+    def status_matches(r):
+        if args.status == "open":
+            return (r["status"] in OPEN_STATUSES or is_waiting(r["status"]))
+        return args.status == "any" or r["status"] == args.status
+
+    def newest(items):
+        return sorted(items, key=lambda r: (r["date"], r["seq"]), reverse=True)
+
+    own = [r for r in records
+           if r["project"] == args.project or args.project in r.get("applies", [])]
+    house = [r for r in records
+             if r not in own
+             and (r.get("applies", []) == ["house"] or r["project"] == "house")]
+
+    eligible = [r for r in own if status_matches(r) and r["kind"] != "ship"]
+    urgent = [r for r in eligible
+              if r["kind"] in ("pipeline", "task")
+              and (r["status"] == "building" or is_waiting(r["status"]))]
+    other_tasks = [r for r in eligible
+                   if r["kind"] == "task"
+                   and not (r["status"] == "building" or is_waiting(r["status"]))]
+    planned = [r for r in eligible if r["kind"] == "pipeline" and r["status"] == "planned"]
+    banded = ("building", "planned", "idea", "parked")
+    other_open = [r for r in eligible if r["kind"] == "pipeline"
+                  and r["status"] not in banded and not is_waiting(r["status"])]
+    deferred = [r for r in eligible
+                if args.status == "any" and r["kind"] == "pipeline"
+                and r["status"] in ("idea", "parked")]
+    decisions = [r for r in eligible if r["kind"] == "decision"]
+    out = (newest(urgent) + newest(other_tasks) + newest(planned) + newest(other_open)
+           + newest(deferred) + newest(decisions))[:args.limit]
+    # the project's own map line opens the slice (status live/building, its why)
+    out = [r for r in records if r["kind"] == "project" and r["id"] == "project:" + args.project][:1] + out
+
+    ships = newest([r for r in own if r["kind"] == "ship" and r["project"] == args.project])
+    if ships:
+        out.append(ships[0])
+    # House-wide context is standing calls only: a one-time decision is done and wakes nobody
+    out.extend(newest([r for r in house if status_matches(r) and r.get("weight") != "one-time"])[:args.house_limit])
+    emit(args, [public(r) for r in out], [one_line(r) for r in out] or ["nothing open"])
+    return 0
+
+
+def cmd_inventory(args, g):
+    records, files, excluded, graph = g
+    collisions, unresolved_by_file, problems = graph[3], graph[4], graph[5]
+    per_file = [dict(f, unresolved=unresolved_by_file.get(f["file"], 0)) for f in files]
+    payload = {"counts": counts(records), "files": per_file, "collisions": collisions,
+               "unresolved": sum(unresolved_by_file.values()), "problems": problems, "excluded": excluded}
+    lines = ["%s: %d indexed" % (PLURAL[k], v) for k, v in counts(records).items()]
+    for f in per_file:
+        lines.append("file %s (%s): indexed %d, unresolved links %d" % (
+            f["file"], f["kind"], f["indexed"], f["unresolved"]))
+    lines.append("unresolved links: %d" % payload["unresolved"])
+    lines.append("collisions: %d" % len(collisions) + "".join(
+        "\n  %s (%d records)" % (i, n) for i, n in sorted(collisions.items())))
+    lines.append("problems: %d" % len(problems) + "".join(
+        "\n  %s: %s (kept %s, also claimed by %s)" % (p["type"], p["alias"], p["kept"], p["also-claimed-by"])
+        for p in problems))
+    lines.append("excluded: %d" % len(excluded) + "".join(
+        "\n  %s (%s): %s" % (e["file"], e["kind"], e["reason"]) for e in excluded))
+    emit(args, payload, lines)
+    return 0
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="work_map", description=__doc__.splitlines()[0])
+    ap.add_argument("--config", default=os.environ.get("WORK_MAP_CONFIG"),
+                    help="JSON or TOML file listing sources by kind (or set WORK_MAP_CONFIG)")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    shared = argparse.ArgumentParser(add_help=False)
+    shared.add_argument("--json", action="store_true", help="print JSON")
+    sub.add_parser("index", parents=[shared], help="parse all sources, print counts")
+    q = sub.add_parser("query", parents=[shared], help="find items by id, project or words")
+    q.add_argument("text")
+    o = sub.add_parser("open", parents=[shared], help="one item with all its links")
+    o.add_argument("id")
+    s = sub.add_parser("slice", parents=[shared], help="newest open items for a lean session start")
+    s.add_argument("--project")
+    s.add_argument("--house", action="store_true")
+    s.add_argument("--status", default="open", help="open (default), any, or an exact status")
+    s.add_argument("--limit", type=int, default=20)
+    s.add_argument("--house-limit", type=int, default=3,
+                   help="house-wide records appended to a project slice (default: 3; 0 disables)")
+    sub.add_parser("inventory", parents=[shared], help="counts per kind and file, problems")
+    args = ap.parse_args(argv)
+    try:
+        sources, base = load_config(args.config)
+    except ConfigError as e:
+        print("work_map: %s" % e, file=sys.stderr)
+        return 2
+    records, files, excluded = load_all(sources, base)
+    g = (records, files, excluded, build_graph(records))
+    return {"index": cmd_index, "query": cmd_query, "open": cmd_open,
+            "slice": cmd_slice, "inventory": cmd_inventory}[args.cmd](args, g) or 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

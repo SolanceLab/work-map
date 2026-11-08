@@ -1,0 +1,3 @@
+- **Weekly digest email** · project: reports · session: a1b2c3d4 · status: planned · Send a Monday summary · spec: specs/digest.md
+- **Old importer** · project: billing · session: a1b2c3d4 · status: done · Replaced · spec: none
+- **Untagged idea** · Something with no tags

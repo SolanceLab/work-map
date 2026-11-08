@@ -1,0 +1,5 @@
+{
+  "map": ["map.md"],
+  "decisions": ["decisions.md"],
+  "pipeline": ["projects/*/PIPELINE.md"]
+}

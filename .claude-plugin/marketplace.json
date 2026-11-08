@@ -1,0 +1,22 @@
+{
+  "name": "work-map",
+  "owner": {
+    "name": "House of Solance"
+  },
+  "metadata": {
+    "description": "A map of your work: decisions, pipeline items, tasks and ships linked from tagged lines in plain files.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "work-map",
+      "description": "Write tagged record lines once, then ask what was decided, what is open and what shipped, with every item linked to its project and session.",
+      "version": "0.1.0",
+      "author": {
+        "name": "House of Solance"
+      },
+      "category": "productivity",
+      "source": "./plugin"
+    }
+  ]
+}
