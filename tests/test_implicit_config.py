@@ -71,6 +71,32 @@ class ImplicitConfigTest(unittest.TestCase):
             self.assertIn("--config", r.stderr)
             self.assertEqual(self.outside_bytes(), before, name)
 
+    def test_implicit_config_outside_is_refused_for_decisions_query_and_prints_nothing(self):
+        for name, target in self.bad_targets().items():
+            self.cfg("work-map.json", [target])
+            r = self.run_script(DEC, "query", "live-slug")
+            self.assertEqual(r.returncode, 2, (name, r.stderr))
+            self.assertIn("--config", r.stderr)
+            self.assertNotIn("live-slug", r.stdout, name)
+
+    def test_query_through_inside_implicit_config_and_no_config_default_still_works(self):
+        inside = os.path.join(self.work, "DECISIONS.md")
+        with open(inside, "w") as fh:
+            fh.write("# decisions\n---\n" + DEC_LINE)
+        r = self.run_script(DEC, "query", "live-slug")  # no config: ./DECISIONS.md
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("live-slug", r.stdout)
+        self.cfg("work-map.json", ["DECISIONS.md"])  # implicit config pointing inside its folder
+        r = self.run_script(DEC, "query", "live-slug")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("live-slug", r.stdout)
+
+    def test_query_with_explicit_config_outside_is_trusted(self):
+        cfg = self.cfg("trusted.json", [self.outside])
+        r = self.run_script(DEC, "query", "live-slug", "--config", cfg)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("live-slug", r.stdout)
+
     def test_implicit_config_outside_or_non_md_is_refused_for_pipeline_file(self):
         before = self.outside_bytes()
         folder = {"absolute": "outside", "dotdot": "outside", "symlink": "work", "not-md": "work"}

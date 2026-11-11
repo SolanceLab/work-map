@@ -1,6 +1,6 @@
 {
   "name": "work-map",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A map of your work: decisions, pipeline items, tasks and ships linked from tagged lines in plain files.",
   "author": { "name": "House of Solance", "url": "https://github.com/SolanceLab" },
   "license": "PolyForm-Noncommercial-1.0.0",

@@ -159,6 +159,12 @@ def query_command(argv):
     terms = [t.lower() for t in " ".join(args.terms).split() if t.strip()]
     try:
         regs = decision_files(args.file, args.config)
+        if not args.file and not args.config:  # implicit config or default file: read only inside its own folder, as add does
+            base = os.path.dirname(os.path.abspath("work-map.json")) if os.path.isfile("work-map.json") else os.getcwd()
+            for r in regs:
+                problem = confined(r, base)
+                if problem:
+                    raise ConfigRefused(problem)
     except ConfigRefused as exc:
         print("refused: %s" % exc, file=sys.stderr)
         return 2

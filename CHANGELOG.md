@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1 - 2026-11-11
+
+- `decisions.py query` follows the same folder rule as the writers: a `work-map.json` found in the current folder can only point at `.md` files inside that folder. Pass `--config` to trust one that points elsewhere.
+
 ## 0.1.0 - 2026-11-11
 
 - First version: `work_map.py` reads tagged decision, pipeline, task and ship lines from plain files and links them (in-session, applies-to, from, belongs-to, done-by, depends-on).
