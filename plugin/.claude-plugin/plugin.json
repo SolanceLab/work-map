@@ -1,6 +1,6 @@
 {
   "name": "work-map",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "A map of your work: decisions, pipeline items, tasks and ships linked from tagged lines in plain files.",
   "author": {
     "name": "House of Solance"

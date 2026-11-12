@@ -4,7 +4,7 @@
 
   add   --slug S --applies a,b|house --from PROJECT --who NAME --time HH:MM --words "..." --call "..." --why "..."
         [--kind standing|one-time] [--date YYYY-MM-DD] [--session ID8] [--file P] [--config C] [--dry-run]
-  query TERMS... [--config C] [--file P]... [--notes P]...
+  query TERMS... [--config C] [--file P]... [--notes P]... [--decision-words REGEX]...
         Lines matching ALL terms (case-insensitive); when none match and there are 2+ terms, the closest
         lines matching at least half, tagged [k/n terms]. Exit 0 always: no match means "not decided on record".
 
@@ -117,7 +117,20 @@ def parse_add_line(line):
     return match.groupdict() if match else None
 
 
-def candidate_lines(path, decision_only):
+def config_decision_words(config):
+    """Extra decision regexes from the config's "decision_words" list; an unreadable config adds none."""
+    config = config or ("work-map.json" if os.path.isfile("work-map.json") else None)
+    if not config:
+        return []
+    try:
+        with open(config, encoding="utf-8") as fh:
+            words = json.load(fh).get("decision_words", [])
+    except (OSError, UnicodeError, ValueError, AttributeError):
+        return []
+    return [w for w in words if isinstance(w, str)] if isinstance(words, list) else []
+
+
+def candidate_lines(path, decision_only, extra=()):
     try:
         with open(path, encoding="utf-8") as fh:
             lines = fh.read().split("\n")
@@ -132,7 +145,7 @@ def candidate_lines(path, decision_only):
                 start = i + 1
                 break
     return [(i, l) for i, l in enumerate(lines, 1)
-            if i > start and (not decision_only or DECISION.search(l))]
+            if i > start and (not decision_only or DECISION.search(l) or any(x.search(l) for x in extra))]
 
 
 def note_files(paths):
@@ -155,8 +168,16 @@ def query_command(argv):
     parser.add_argument("--config", default=default_config())
     parser.add_argument("--file", action="append")
     parser.add_argument("--notes", action="append", default=[])
+    parser.add_argument("--decision-words", action="append", default=[], metavar="REGEX")
     args = parser.parse_args(argv)
     terms = [t.lower() for t in " ".join(args.terms).split() if t.strip()]
+    extra = []
+    for pattern in args.decision_words + config_decision_words(args.config):
+        try:
+            extra.append(re.compile(pattern))
+        except re.error as exc:
+            print("refused: decision words %r is not a valid regex: %s" % (pattern, exc), file=sys.stderr)
+            return 2
     try:
         regs = decision_files(args.file, args.config)
         if not args.file and not args.config:  # implicit config or default file: read only inside its own folder, as add does
@@ -172,7 +193,7 @@ def query_command(argv):
     sources = [(r, False) for r in regs] + [(n, True) for n in notes]
     found = []
     for path, only in sources:
-        found += [(path, i, l.strip()[:300]) for i, l in candidate_lines(path, only)
+        found += [(path, i, l.strip()[:300]) for i, l in candidate_lines(path, only, extra)
                   if all(t in l.lower() for t in terms)]
     if found:
         for path, i, l in found[:25]:
@@ -183,7 +204,7 @@ def query_command(argv):
         need = math.ceil(len(uniq) / 2)
         part = []
         for path, only in sources:
-            for i, l in candidate_lines(path, only):
+            for i, l in candidate_lines(path, only, extra):
                 k = sum(1 for t in uniq if t in l.lower())
                 if k >= need:
                     part.append((k, path, i, l.strip()[:300]))

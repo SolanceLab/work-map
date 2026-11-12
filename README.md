@@ -39,6 +39,8 @@ work-map also has its own store, if you added it before: `/plugin marketplace ad
 
 A map of your work: decisions, pipeline items, tasks and ships, linked from tagged lines in plain markdown and JSON files. A standard-library Python tool reads the files and answers "what did we decide about this?", "what is open for this project?" and "what shipped, and on which decisions?". A skill teaches your agent to write the lines. The tool reads files only and writes nothing.
 
+**Where it fits.** work-map maps your work records (what you decided, planned, did and shipped), not your notes or your memories. For where you wrote something in your notes, use [vault-map](https://github.com/SolanceLab/vault-map); for one question across everything you have saved, [Antechamber](https://github.com/SolanceLab/antechamber), which can read work-map as its work shelf.
+
 ## What you need
 
 Python 3.9 or newer and nothing else (standard library only). work-map runs on your own computer, reads your files and sends nothing anywhere.
@@ -64,7 +66,7 @@ Your AI runs these for you through the skill. By hand, one command answers most 
 python3 plugin/scripts/work_map.py --config <file> query <words>
 ```
 
-`query` finds records, `open <id>` shows one with its links, `slice --project <p>` gives a project's latest, `inventory` checks for broken links. The writers (`decisions.py`, `pipeline.py`) add and update lines. Every command and flag: [docs/commands.md](docs/commands.md).
+`query` finds records, `open <id>` shows one with its links, `slice --project <p>` gives a project's latest, `inventory` checks for broken links. The writers (`decisions.py`, `pipeline.py`, `ships.py`) add and update lines. Every command and flag: [docs/commands.md](docs/commands.md).
 
 ### The skill
 

@@ -1,0 +1,17 @@
+{
+  "description": "After a release command (gh release create, git tag vX.Y.Z, git push of a tag), reminds the AI to write the ship line with ships.py and mark pipeline items done. Off: set WORK_MAP_SHIP_REMINDER=0.",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ship_reminder.py\" || python \"${CLAUDE_PLUGIN_ROOT}/hooks/ship_reminder.py\" || exit 0",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

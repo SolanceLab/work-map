@@ -20,10 +20,15 @@ The same folder holds the writers, so the lines cannot drift from what the reade
 
 ```
 python3 plugin/scripts/decisions.py add --slug S --applies a,b|house --from PROJECT --who NAME --time HH:MM --words "..." --call "..." --why "..." [--kind standing|one-time] [--session ID8]
-python3 plugin/scripts/decisions.py query <terms>... [--notes <file-or-folder>]...
+python3 plugin/scripts/decisions.py query <terms>... [--notes <file-or-folder>]... [--decision-words <regex>]...
 python3 plugin/scripts/pipeline.py add --project P --item TITLE --id SLUG --status S --why W [--spec P] [--decisions a,b] [--detail L]...
 python3 plugin/scripts/pipeline.py update (--project P | --file F) --id SLUG [--status S] [--devlog YYYY-MM-DD] [--add-detail L]
 python3 plugin/scripts/pipeline.py check FILE...
+python3 plugin/scripts/ships.py add --project P --version V --sha SHA [--decisions a,b|none] [--tasks t1,t2|none] [--date YYYY-MM-DD] [--session ID8] [--file F]
 ```
+
+`--decision-words` (repeatable) adds a Python regex for the lines of `--notes` files that mark a decision, on top of the built-in words; the config key `decision_words` does the same, and a regex that does not compile is refused with exit 2.
+
+`ships.py add` writes one ship line to the config's `ships` file (the one in a folder named like the project, else the only one; `./DEVLOG.md` with no config), and refuses a second line for the same project and version. A plugin hook (`plugin/hooks/ship_reminder.py`) reminds the AI to run it after `gh release create`, `git tag vX.Y.Z` or a tag push; it never blocks, and `WORK_MAP_SHIP_REMINDER=0` turns it off.
 
 `pipeline.py` keeps the sections `Now` (building, waiting), `Next` (planned), `Later` (idea, parked) and `Done` (done, dropped), and stamps `touched:` on every change. Set `WORK_MAP_SESSION` to the first 8 characters of your session id instead of passing `--session`.

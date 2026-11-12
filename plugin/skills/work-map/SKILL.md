@@ -5,7 +5,7 @@ description: Write decisions, pipeline items, tasks and ship lines in the tagged
 
 # work-map
 
-work-map links your work from plain lines. Write each line in exactly one of the four shapes below, separated by ` · ` (space, middle dot, space). Use the two writer commands below for decisions and pipeline items: they refuse bad input, never duplicate, and check what they wrote. Any tag may be left out: the line is still indexed, with project and session shown as `unknown`. Tags only link things when they are filled in, so fill in what you know.
+work-map links your work from plain lines. Write each line in exactly one of the four shapes below, separated by ` · ` (space, middle dot, space). Use the writer commands below for decisions, pipeline items and ship lines: they refuse bad input, never duplicate, and check what they wrote. Any tag may be left out: the line is still indexed, with project and session shown as `unknown`. Tags only link things when they are filled in, so fill in what you know.
 
 ## Session id
 
@@ -39,7 +39,13 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/pipeline.py check reports/PIPELINE.md
 
 Statuses: idea, planned, building, waiting (or `waiting-on-<name>`), parked, done, dropped. `done` needs `--devlog <date>`; `dropped` needs `--add-detail` saying why. `--decisions` slugs must already exist in the decision files.
 
-Ship lines and tasks have no writer: write them by hand in the shapes below.
+Write a ship line (appends to the project's ships file, or `--file`; `--dry-run` shows the line without writing):
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/ships.py add --project reports --version v0.4.0 --sha 9f3c2ab --decisions keep-csv-export --tasks t-14,t-15
+```
+
+Tasks have no writer: write them by hand in the shape below.
 
 ## 1. Decision
 
@@ -88,6 +94,8 @@ Template:
 Example:
 
 `2026-03-09 · session: a1b2c3d4 · project: reports · shipped v0.4.0 9f3c2ab · decisions: keep-csv-export · tasks closed: t-14, t-15`
+
+Write it with `ships.py add` (above): it checks the shape and refuses a second line for the same project and version. A quiet hook reminds you after a release command; turn it off with `WORK_MAP_SHIP_REMINDER=0`.
 
 Separate several slugs or ids with commas.
 
