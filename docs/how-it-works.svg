@@ -1,0 +1,136 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1020 560" width="1020" height="560" role="img" aria-labelledby="t d">
+  <title id="t">How work-map works</title>
+  <desc id="d">Your work is spread across many folders: one decisions file, a task list and a map of projects at the top, and in every project folder its own pipeline, its devlog and its specs. Each record is one plain line. work-map reads them all and ties the lines together across folders. Asked why the bot retries three times, it hands back the chain: the release that shipped it, the pipeline item it was done by with its spec, the decision it rested on, and the same decision still open for another project.</desc>
+  <style>
+    .bg{fill:none}
+    .frame{fill:#f6f8fa;stroke:#8c959f;stroke-width:1.5;stroke-dasharray:6 5}
+    .title{font:600 17px -apple-system,Segoe UI,Helvetica,Arial,sans-serif;fill:#1f2328}
+    .label{font:500 12px -apple-system,Segoe UI,Helvetica,Arial,sans-serif;fill:#1f2328}
+    .small{font:400 11px -apple-system,Segoe UI,Helvetica,Arial,sans-serif;fill:#59636e}
+    .verb{font:600 15px -apple-system,Segoe UI,Helvetica,Arial,sans-serif;fill:#1f2328}
+    .arrow{stroke:#59636e;stroke-width:2;fill:none}
+    .head{fill:#59636e}
+    .line{stroke:#afb8c1;stroke-width:3;stroke-linecap:round}
+    .plank{stroke:#59636e;stroke-width:3;stroke-linecap:round}
+    .note{fill:#dafbe1;stroke:#1a7f37}
+    .chat{fill:#ddf4ff;stroke:#0969da}
+    .mem{fill:#fbefff;stroke:#8250df}
+    .vault{fill:#fff1e5;stroke:#bc4c00}
+    .q{fill:#ffffff;stroke:#1f2328}
+    .old{stroke:#afb8c1;stroke-width:2;stroke-dasharray:5 5;fill:none}.oldhead{fill:#afb8c1}.x{stroke:#cf222e}
+    .note.pick{fill:#1a7f37}.chat.pick{fill:#0969da}.mem.pick{fill:#8250df}
+    .ante{fill:#1f2328;stroke:#1f2328}
+    .antetext{font:600 14px -apple-system,Segoe UI,Helvetica,Arial,sans-serif;fill:#ffffff}
+    .card{fill:#ffffff;stroke:#8c959f}
+    @media (prefers-color-scheme: dark){
+      .frame{fill:#161b22;stroke:#6e7681}
+      .title,.label,.verb{fill:#e6edf3}
+      .small{fill:#9198a1}
+      .arrow{stroke:#9198a1}.head{fill:#9198a1}
+      .line{stroke:#484f58}
+      .plank{stroke:#9198a1}
+      .note{fill:#0f2a17;stroke:#3fb950}
+      .chat{fill:#0c2440;stroke:#4493f8}
+      .mem{fill:#2a1640;stroke:#ab7df8}
+      .vault{fill:#3a1d0a;stroke:#f0883e}
+      .q{fill:#0d1117;stroke:#e6edf3}
+      .old{stroke:#484f58}.oldhead{fill:#484f58}.x{stroke:#f85149}
+      .note.pick{fill:#3fb950}.chat.pick{fill:#4493f8}.mem.pick{fill:#ab7df8}
+      .ante{fill:#e6edf3;stroke:#e6edf3}
+      .antetext{fill:#0d1117}
+      .card{fill:#0d1117;stroke:#6e7681}
+    }
+    .hl{fill:#fff8c5;stroke:#9a6700}.hltext{font:500 12px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#1f2328}
+    .mono{font:400 11px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#59636e}
+    .tag{font:600 11px -apple-system,Segoe UI,Helvetica,Arial,sans-serif}
+    .tdec{fill:#8250df}.ttask{fill:#0969da}.tship{fill:#1a7f37}
+    .thread{stroke:#9a6700;stroke-width:2.5;fill:none}.drawer{fill:none;stroke:#ffffff;stroke-width:1.5}
+    @media (prefers-color-scheme: dark){
+      .hl{fill:#2e2a0e;stroke:#d29922}.hltext{fill:#e6edf3}.mono{fill:#9198a1}
+      .tdec{fill:#ab7df8}.ttask{fill:#4493f8}.tship{fill:#3fb950}.thread{stroke:#d29922}.drawer{stroke:#0d1117}
+    }
+    .folder{font:600 12px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#1f2328}
+    .rowpick{fill:#fff8c5}
+    .link{font:italic 400 11px -apple-system,Segoe UI,Helvetica,Arial,sans-serif;fill:#9a6700}
+    .ptr{fill:none;stroke:#8c959f;stroke-dasharray:3 3}.tvault{fill:#bc4c00}.tmuted{fill:#59636e}
+    @media (prefers-color-scheme: dark){ .folder{fill:#e6edf3}.rowpick{fill:#2e2a0e}.link{fill:#d29922}.ptr{stroke:#6e7681}.tvault{fill:#f0883e}.tmuted{fill:#9198a1} }
+  </style>
+<rect class="frame" x="20" y="20" width="370" height="480" rx="14"/><text class="title" x="40" y="52">Your work, in many folders</text>
+<text class="folder" x="40" y="86">workspace/</text>
+<rect class="rowpick" x="52" y="95" width="324" height="22" rx="4"/>
+<text class="mono" x="70" y="110">DECISIONS.md</text>
+<rect class="mem" x="196" y="99" width="58" height="16" rx="4" stroke-width="1.2"/>
+<text class="tag tdec" x="225" y="111" text-anchor="middle" style="font-size:10px">decision</text>
+<text class="small" x="262" y="111">every decision, one file</text>
+<rect class="rowpick" x="52" y="121" width="324" height="22" rx="4"/>
+<text class="mono" x="70" y="136">now.json</text>
+<rect class="vault" x="196" y="125" width="58" height="16" rx="4" stroke-width="1.2"/>
+<text class="tag tvault" x="225" y="137" text-anchor="middle" style="font-size:10px">task</text>
+<text class="small" x="262" y="137">tasks</text>
+<text class="mono" x="70" y="162">PIPELINE.md</text>
+<rect class="card" x="196" y="151" width="58" height="16" rx="4" stroke-width="1.2"/>
+<text class="tag tmuted" x="225" y="163" text-anchor="middle" style="font-size:10px">map</text>
+<text class="small" x="262" y="163">the map of projects</text>
+<text class="folder" x="40" y="190">projects/bot/</text>
+<rect class="rowpick" x="52" y="199" width="324" height="22" rx="4"/>
+<text class="mono" x="70" y="214">PIPELINE.md</text>
+<rect class="chat" x="196" y="203" width="58" height="16" rx="4" stroke-width="1.2"/>
+<text class="tag ttask" x="225" y="215" text-anchor="middle" style="font-size:10px">item</text>
+<text class="small" x="262" y="215">planned, building, done</text>
+<rect class="rowpick" x="52" y="225" width="324" height="22" rx="4"/>
+<text class="mono" x="70" y="240">DEVLOG.md</text>
+<rect class="note" x="196" y="229" width="58" height="16" rx="4" stroke-width="1.2"/>
+<text class="tag tship" x="225" y="241" text-anchor="middle" style="font-size:10px">ship</text>
+<text class="small" x="262" y="241">what shipped</text>
+<text class="mono" x="70" y="266">plans/retry.md</text>
+<rect class="ptr" x="196" y="255" width="58" height="16" rx="4" stroke-width="1.2"/>
+<text class="tag tmuted" x="225" y="267" text-anchor="middle" style="font-size:10px">spec</text>
+<text class="small" x="262" y="267">a spec, linked</text>
+<text class="folder" x="40" y="294">projects/site/</text>
+<rect class="rowpick" x="52" y="303" width="324" height="22" rx="4"/>
+<text class="mono" x="70" y="318">PIPELINE.md</text>
+<rect class="chat" x="196" y="307" width="58" height="16" rx="4" stroke-width="1.2"/>
+<text class="tag ttask" x="225" y="319" text-anchor="middle" style="font-size:10px">item</text>
+<text class="mono" x="70" y="344">DEVLOG.md</text>
+<rect class="note" x="196" y="333" width="58" height="16" rx="4" stroke-width="1.2"/>
+<text class="tag tship" x="225" y="345" text-anchor="middle" style="font-size:10px">ship</text>
+<text class="folder" x="40" y="372">projects/app/</text>
+<text class="mono" x="70" y="396">PIPELINE.md</text>
+<rect class="chat" x="196" y="385" width="58" height="16" rx="4" stroke-width="1.2"/>
+<text class="tag ttask" x="225" y="397" text-anchor="middle" style="font-size:10px">item</text>
+<text class="mono" x="70" y="422">DEVLOG.md</text>
+<rect class="note" x="196" y="411" width="58" height="16" rx="4" stroke-width="1.2"/>
+<text class="tag tship" x="225" y="423" text-anchor="middle" style="font-size:10px">ship</text>
+<path class="thread" d="M58 106 L58 132 L58 210 L58 236 L58 314"/>
+<circle cx="58" cy="106" r="3.5" class="tship" style="fill:#d29922"/>
+<circle cx="58" cy="132" r="3.5" class="tship" style="fill:#d29922"/>
+<circle cx="58" cy="210" r="3.5" class="tship" style="fill:#d29922"/>
+<circle cx="58" cy="236" r="3.5" class="tship" style="fill:#d29922"/>
+<circle cx="58" cy="314" r="3.5" class="tship" style="fill:#d29922"/>
+<text class="small" x="40" y="486">one plain line each, written by your AI (the work-map skill)</text>
+<path class="arrow" d="M390 270 H428"/><polygon class="head" points="438,270 428,264 428,276"/><text class="small" x="414" y="256" text-anchor="middle">reads</text>
+<rect class="ante" x="440" y="224" width="140" height="92" rx="10"/><text class="antetext" x="510" y="252" text-anchor="middle">work-map</text>
+<text class="antetext" x="510" y="276" text-anchor="middle" style="font-weight:400;font-size:12px">ties the lines</text><text class="antetext" x="510" y="292" text-anchor="middle" style="font-weight:400;font-size:12px">across every folder</text>
+<text class="small" x="510" y="336" text-anchor="middle">reads only · writes nothing</text>
+<path class="arrow" d="M580 270 H638"/><polygon class="head" points="648,270 638,264 638,276"/>
+<rect class="frame" x="650" y="20" width="350" height="480" rx="14"/><text class="title" x="670" y="52">What you get back</text>
+<rect class="q" x="670" y="70" width="314" height="40" rx="8" stroke-width="1.5"/><text class="label" x="686" y="95">Why does the bot retry three times?</text>
+<rect class="card" x="670" y="136" width="314" height="60" rx="8" stroke-width="1.5"/>
+<rect class="note" x="684" y="148" width="62" height="18" rx="4" stroke-width="1.2"/><text class="tag tship" x="715" y="161" text-anchor="middle" style="font-size:10px">ship</text>
+<text class="label" x="756" y="162">bot 1.4 shipped</text><text class="mono" x="684" y="184" style="font-size:10px">projects/bot/DEVLOG.md</text>
+<path class="thread" d="M960 196 V226"/><text class="link" x="950" y="215" text-anchor="end">done by</text>
+<rect class="card" x="670" y="226" width="314" height="60" rx="8" stroke-width="1.5"/>
+<rect class="chat" x="684" y="238" width="62" height="18" rx="4" stroke-width="1.2"/><text class="tag ttask" x="715" y="251" text-anchor="middle" style="font-size:10px">item</text>
+<text class="label" x="756" y="252">retry on timeout</text><text class="mono" x="684" y="274" style="font-size:10px">projects/bot/PIPELINE.md · spec: plans/retry.md</text>
+<path class="thread" d="M960 286 V316"/><text class="link" x="950" y="305" text-anchor="end">rested on</text>
+<rect class="card" x="670" y="316" width="314" height="60" rx="8" stroke-width="1.5"/>
+<rect class="mem" x="684" y="328" width="62" height="18" rx="4" stroke-width="1.2"/><text class="tag tdec" x="715" y="341" text-anchor="middle" style="font-size:10px">decision</text>
+<text class="label" x="756" y="342">retry three times, then alert</text><text class="mono" x="684" y="364" style="font-size:10px">DECISIONS.md · applies to: bot, site</text>
+<path class="thread" d="M960 376 V406"/><text class="link" x="950" y="395" text-anchor="end">also applies to</text>
+<rect class="card" x="670" y="406" width="314" height="60" rx="8" stroke-width="1.5"/>
+<rect class="chat" x="684" y="418" width="62" height="18" rx="4" stroke-width="1.2"/><text class="tag ttask" x="715" y="431" text-anchor="middle" style="font-size:10px">item</text>
+<text class="label" x="756" y="432">add the same retry to the site</text><text class="mono" x="684" y="454" style="font-size:10px">projects/site/PIPELINE.md · still open</text>
+<path class="thread" d="M960 110 V136"/>
+<text class="small" x="670" y="486">each step names the line that says why</text>
+<text class="small" x="510" y="530" text-anchor="middle">standard-library Python · your notes stay plain text in your folders</text>
+</svg>

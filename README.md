@@ -2,6 +2,39 @@
 
 Made by House of Solance · free for noncommercial use · credit required
 
+work-map answers what you decided, what is still open and what shipped, from the plain notes you already keep.
+
+<div align="center">
+
+🧭
+
+*Every project leaves a trail. A decision in one note. A task in a list. A release that went out because of both. Each line made sense on the day it was written.*
+
+*Weeks later, someone asks why it works this way. The answer is in there somewhere, split across files nobody connects. Your AI rereads everything, guesses, and sometimes undoes a choice you made for a good reason.*
+
+**work-map is the logbook that ties the threads.** *Each decision, open task and shipped release is one plain line in your own notes. work-map reads those lines and ties each one to the reason it exists. Ask what you decided, what is still open, or what a release rested on, and it follows the thread back to the line that says why.*
+
+*It only reads. Your notes stay plain text, in your folders, written by you.*
+
+</div>
+
+<p align="center"><img src="docs/how-it-works.svg" width="900" alt="Your notes hold one line per decision, task and release. work-map reads them and ties each line to the reason it exists. Asked why a release works the way it does, it follows the thread: the release, the decision it rested on with the words that made it, and the task still open."></p>
+
+## Quick start
+
+**Let your AI do it.** Copy this and send it to Claude Code:
+
+```
+Please install work-map for me:
+claude plugin marketplace add SolanceLab/plugins
+claude plugin install work-map@solancelab
+Then show me how to keep the record and ask it a question.
+```
+
+**Or do it yourself:** run the two `claude plugin` lines from that message in your terminal.
+
+work-map also has its own store, if you added it before: `/plugin marketplace add SolanceLab/work-map`, then `/plugin install work-map@work-map`. To check it works, run `make test` in a clone.
+
 ## What it is
 
 A map of your work: decisions, pipeline items, tasks and ships, linked from tagged lines in plain markdown and JSON files. A standard-library Python tool reads the files and answers "what did we decide about this?", "what is open for this project?" and "what shipped, and on which decisions?". A skill teaches your agent to write the lines. The tool reads files only and writes nothing.
@@ -10,20 +43,9 @@ A map of your work: decisions, pipeline items, tasks and ships, linked from tagg
 
 Python 3.9 or newer and nothing else (standard library only). work-map runs on your own computer, reads your files and sends nothing anywhere.
 
-## Install
-
-In Claude Code:
-
-```
-/plugin marketplace add SolanceLab/work-map
-/plugin install work-map@work-map
-```
-
-To check it works, run `make test` in a clone.
-
 ## Settings
 
-A small JSON (or TOML, Python 3.11+) file listing source files by kind. Globs are allowed; relative paths are read from the config file's folder. Pass it with `--config` or set `WORK_MAP_CONFIG`. A `work-map.json` picked up from the current folder (neither flag nor variable given) is implicit: the writers only write `.md` files that resolve, symlinks included, to inside that folder, and refuse otherwise; pass `--config` to trust a config that points elsewhere. `--file` is always trusted.
+One small JSON file lists your record files by kind; folder patterns like `projects/*/PIPELINE.md` are allowed. Pass it with `--config` or set `WORK_MAP_CONFIG`. Where it is looked for and which paths it trusts: [docs/settings.md](docs/settings.md).
 
 ```json
 {
@@ -36,90 +58,32 @@ A small JSON (or TOML, Python 3.11+) file listing source files by kind. Globs ar
 
 ## Tools
 
-```
-python3 plugin/scripts/work_map.py --config <file> <command> [--json]
-```
-
-- `index`: parse everything, print counts.
-- `query <text>`: items whose id, project or words match all the given words, one line each: `<kind> <id> · <project> · <status or date> · <gist> · links: … · source: <file>:L<n>`.
-- `open <id>`: one item with its links, what links to it, and its source line.
-- `slice --project <p>|--house [--status open|any|<status>] [--limit N]`: newest first, the same one-line form, for a lean session start. `open` means pipeline items not done, tasks not done, and decisions; ships are left out. Undated items sort after dated ones, later lines first.
-- `inventory`: counts per kind and per file, unresolved links, collisions, and files excluded with the reason.
-
-Exit codes: 0 success, 1 `open` found nothing, 2 bad config.
-
-### Writers
-
-The same folder holds the writers, so the lines cannot drift from what the reader parses. Both take `--config` (else `WORK_MAP_CONFIG`, else `./work-map.json`) and `--file`; both refuse bad input, restore the file byte for byte if the written line does not parse back, and take `--dry-run` (`decisions.py add`, `pipeline.py add`).
+Your AI runs these for you through the skill. By hand, one command answers most questions:
 
 ```
-python3 plugin/scripts/decisions.py add --slug S --applies a,b|house --from PROJECT --who NAME --time HH:MM --words "..." --call "..." --why "..." [--kind standing|one-time] [--session ID8]
-python3 plugin/scripts/decisions.py query <terms>... [--notes <file-or-folder>]...
-python3 plugin/scripts/pipeline.py add --project P --item TITLE --id SLUG --status S --why W [--spec P] [--decisions a,b] [--detail L]...
-python3 plugin/scripts/pipeline.py update (--project P | --file F) --id SLUG [--status S] [--devlog YYYY-MM-DD] [--add-detail L]
-python3 plugin/scripts/pipeline.py check FILE...
+python3 plugin/scripts/work_map.py --config <file> query <words>
 ```
 
-`pipeline.py` keeps the sections `Now` (building, waiting), `Next` (planned), `Later` (idea, parked) and `Done` (done, dropped), and stamps `touched:` on every change. Set `WORK_MAP_SESSION` to the first 8 characters of your session id instead of passing `--session`.
+`query` finds records, `open <id>` shows one with its links, `slice --project <p>` gives a project's latest, `inventory` checks for broken links. The writers (`decisions.py`, `pipeline.py`) add and update lines. Every command and flag: [docs/commands.md](docs/commands.md).
+
+### The skill
+
+Installing the plugin also gives your AI the work-map skill. It keeps the record as you work: when you decide something, plan an idea, start or finish a task, or ship a release, it writes the line in the right shape with the writer commands above, updating the line that is already there instead of adding a second one. You never type the commands yourself. Ask your AI what you decided about something, or what is still open, and it reads the map back.
 
 ## Limits
 
 - Reads UTF-8 text files and JSON only; the config is JSON, or TOML on Python 3.11 or newer.
-- Only the four line shapes below are parsed; any other line is ignored.
+- Only the four line shapes in [docs/record-format.md](docs/record-format.md) are parsed; any other line is ignored.
 - `query` prints every match; `slice` stops at `--limit` (default 20 for the project, `--house-limit` default 3 for house-wide decisions).
-- The writers lock a file by the system's advisory lock where there is one (macOS and Linux); on other systems two writers at once are not protected.
-- An implicit config can only write inside its own folder, checked once before the write. Someone who can change files in that folder *while* a writer runs (swapping a folder for a link at that moment) could still redirect it; such a person can already edit your files directly, so that case is out of scope.
+- The writers are guarded against writing outside your folder and against two writers at once; the exact limits of both: [docs/settings.md](docs/settings.md#writer-safety-limits).
 
 ## How it works
 
-A small parser reads your files and builds a graph in memory; nothing is saved between runs. These are the line shapes it reads.
+work-map reads the files you list in its settings each time you ask. It keeps nothing between runs and writes nothing.
 
-Fields are separated by ` · `. Any field may be missing: a line with no tags is still indexed, with project and session `unknown`. These four shapes are the only ones parsed.
+Each record is one plain line with tags separated by ` · `: a decision, a pipeline item, a task or a ship. From those tags alone, work-map ties the lines together: a decision to the projects it applies to, a pipeline item to its project and its spec, a ship to the tasks it closed. A line it cannot fully read is still kept, marked `unknown`.
 
-Decision (a markdown list line):
-
-```
-- <YYYY-MM-DD> · session: <id> · applies: [<project>, …|house] · from: <project> · <slug> · <who> (<HH:MM> "<words>") → <the call> · Why: <reason>
-```
-
-Pipeline item:
-
-```
-- **<title>** · project: <project> · session: <id> · status: idea|planned|building|done · <text> · spec: <path|none>
-```
-
-Task: a JSON object in a list, with `id`, `title` and optional `project`, `session`, `decisions[]`, `status`.
-
-Ship line:
-
-```
-<YYYY-MM-DD> · session: <id> · project: <repo> · shipped <version> <sha> · decisions: <slugs> · tasks closed: <ids>
-```
-
-A decision may carry `kind: standing|one-time`: `standing` is a rule future work follows, `one-time` is a choice about one finished piece of work (or a record of something that happened). `from: unknown` gives no link.
-
-In list fields (`applies`, `decisions`, `tasks closed`), `none` means there are none and `unknown` means nobody recorded them; both give no link, and the source line keeps which was written.
-
-Pipeline files come in two formats. A **map line** (key `map` in the config; one per project) becomes a `project:<id>` record:
-
-```
-- **<name>** · id: <project-id> · status: live|building|later|closed · aka: <old names|none> · why: <reason>
-```
-
-An `aka` name resolves to the project id, so a decision that applies to an old name links to the project. Two projects claiming one old name are listed under `problems` in `inventory`. A **project item line** sits in that project's own PIPELINE file (the project is the folder name unless a `project:` tag says otherwise):
-
-```
-- **<item>** · id: <slug> · status: idea|planned|building|waiting|waiting-on-<name>|parked|done|dropped · why: <reason> · spec: <path|none> · decisions: <slugs|none>
-  - details, as indented lines
-```
-
-A status of `waiting`, or `waiting-on-<name>` (for example `waiting-on-sam`), marks an item that waits on someone. It counts as open, and in a slice it sits with `building` at the top. Any other status is kept as written.
-
-Indented `- ` lines under a map or item line are its details, never items of their own. `open` shows them.
-
-Every item gets an id: `decision:<slug>`, `pipeline:<project>/<title-slug>`, `task:<id>`, `ship:<repo>@<version>` (`@<sha>` when there is no version). Projects and sessions named by tags are nodes too: `project:<name>`, `session:<id>`. The file and line are kept as `source`, never as identity.
-
-Six links, each derived only from tags: `in-session`, `applies-to` (a decision's applies list; `house` is `project:house`), `from`, `belongs-to` (task or pipeline item to its project), `done-by` (a ship to the tasks it closed), `depends-on` (a task or ship to the decisions it names). A link to something that is not in the files is kept as `unresolved:<id>`. Two records with the same id are both kept and listed as collisions.
+The exact line shapes, the ids and the six kinds of link are in [docs/record-format.md](docs/record-format.md). You rarely need them: the work-map skill writes the lines for you.
 
 ## Credit and use
 
