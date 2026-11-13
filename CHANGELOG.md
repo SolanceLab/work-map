@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0
+
+- `ships.py add` puts the new line directly under the anchor line `<!-- work-map: newest first -->` when the file has one (appends when it has none; refuses a file with two). A ships file it creates starts with the anchor.
+- `decisions.py add --supersedes <old-slug>` marks the replaced decision `SUPERSEDED by <slug>` and writes the new line in one atomic step; the reader gives the old one the status `superseded` (not open) and `--json` carries `superseded_by`.
+- `decisions.py query` lists newest first, shows a `[superseded by <slug>]` prefix, and prints `showing N of M; add a term to narrow` whenever it cuts the list.
+
 ## 0.2.0
 
 - `decisions.py query` takes `--decision-words REGEX` and a config key `decision_words`, so `--notes` lines can be recognised as decisions by your own marker (the built-in words still apply).

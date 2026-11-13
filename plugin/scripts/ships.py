@@ -9,6 +9,9 @@ Line: <date> · session: <id> · project: <P> · shipped <V> <SHA> · decisions:
 Target file: --file, else the config's "ships" list (--config, else $WORK_MAP_CONFIG, else ./work-map.json):
 the one file with a folder named like the project, else the only file listed, else refused.
 With no config and no --file: ./DEVLOG.md. A second line for the same project and version is refused.
+Where the line goes: directly under the file's one anchor line `<!-- work-map: newest first -->` when it has one
+(two or more anchors: refused, file untouched); with no anchor it is appended at the end. A new file starts
+`# <project> DEVLOG`, a blank line, the anchor, then the line.
 The session id is --session or $WORK_MAP_SESSION, else "unknown". Python 3.9+, standard library only.
 """
 import argparse, datetime, glob, json, os, re, sys
@@ -17,6 +20,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _writelock import locked, confined
 from decisions import atomic_write, restore_original, default_config, ConfigRefused
 import work_map
+
+ANCHOR = "<!-- work-map: newest first -->"
 
 
 def config_ship_files(config):
@@ -117,10 +122,17 @@ def add_command(argv):
     with locked(target):
         wrote = False
         original = None
+        anchor_at = None
         try:
             if os.path.exists(target):
                 with open(target, "rb") as fh:
                     original = fh.read()
+                anchors = [n for n, old in enumerate(original.decode("utf-8").splitlines(), 1) if old.strip() == ANCHOR]
+                if len(anchors) > 1:
+                    print("refused: %s has %d anchor lines (%s); keep exactly one %s" % (
+                        target, len(anchors), ", ".join("line %d" % n for n in anchors), ANCHOR), file=sys.stderr)
+                    return 2
+                anchor_at = anchors[0] if anchors else None
                 for n, old in enumerate(original.decode("utf-8").splitlines(), 1):
                     r = work_map.parse_ship(old, (target, n))
                     if r and r["project"] == args.project and r["version"] == args.version:
@@ -130,14 +142,23 @@ def add_command(argv):
                 print(line)
                 print(target)
                 return 0
-            head = b"" if original is not None else ("# %s DEVLOG\n\n" % args.project).encode("utf-8")
-            body = (original or b"")
-            sep = b"\n" if body and not body.endswith(b"\n") else b""
             os.makedirs(os.path.dirname(target), exist_ok=True)
             wrote = True
-            atomic_write(target, head + body + sep + (line + "\n").encode("utf-8"))
+            if original is None:
+                new_data = ("# %s DEVLOG\n\n%s\n" % (args.project, ANCHOR) + line + "\n").encode("utf-8")
+                anchor_at = 3
+            elif anchor_at:
+                parts = original.decode("utf-8").splitlines(keepends=True)
+                above, below = "".join(parts[:anchor_at]), "".join(parts[anchor_at:])
+                nl = "" if above.endswith(("\n", "\r")) else "\n"
+                new_data = (above + nl + line + "\n" + below).encode("utf-8")
+            else:
+                sep = b"\n" if original and not original.endswith(b"\n") else b""
+                new_data = original + sep + (line + "\n").encode("utf-8")
+            atomic_write(target, new_data)
             with open(target, encoding="utf-8") as fh:
-                last = fh.read().splitlines()[-1]
+                lines_now = fh.read().splitlines()
+            last = lines_now[anchor_at] if anchor_at else lines_now[-1]  # the line under the anchor, else the last line
             r = work_map.parse_ship(last, (target, 0))
             want = [("depends-on", "decision:" + work_map.slugify(d)) for d in decisions] + [("done-by", "task:" + t) for t in tasks]
             if not (r and r["kind"] == "ship" and r["project"] == args.project and r["version"] == args.version

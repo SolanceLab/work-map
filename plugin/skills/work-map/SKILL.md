@@ -19,14 +19,14 @@ When the line already exists (same decision slug, same pipeline title and projec
 
 Run them with `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/<script>`. The config is `--config <file>`, else `$WORK_MAP_CONFIG`, else `./work-map.json`. Set `WORK_MAP_SESSION` to your 8-character session id once, or pass `--session`.
 
-Add a decision (appends one line to the first decision file in the config, or `--file`; `--dry-run` shows the line without writing):
+Add a decision (appends one line to the first decision file in the config, or `--file`; `--dry-run` shows the line without writing; `--supersedes <old-slug>` also marks the old line in that file `SUPERSEDED by <slug>`):
 
 ```
 python3 ${CLAUDE_PLUGIN_ROOT}/scripts/decisions.py add --slug keep-csv-export --applies billing,reports --from billing --who Sam --time 14:05 --words "keep the CSV" --call "CSV export stays in v2" --why "three clients import it" [--kind standing|one-time]
 python3 ${CLAUDE_PLUGIN_ROOT}/scripts/decisions.py query keep csv
 ```
 
-`query` checks what is already decided before you ask the user again.
+`query` checks what is already decided before you ask the user again. It lists the newest first, marks a replaced decision `[superseded by <slug>]`, and says `showing N of M; add a term to narrow` when it cuts the list. When a new decision replaces an old one, add it with `--supersedes <old-slug>` instead of editing the old line by hand.
 
 Add or change a pipeline item in a project's `PIPELINE.md` (the project is the folder name; the config's `map` aka list resolves old names). `add` stamps `touched:`; `update` moves the item to the right section (`Now` for building and any waiting status, `Next` for planned, `Later` for idea and parked, `Done` for done and dropped):
 
@@ -39,7 +39,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/pipeline.py check reports/PIPELINE.md
 
 Statuses: idea, planned, building, waiting (or `waiting-on-<name>`), parked, done, dropped. `done` needs `--devlog <date>`; `dropped` needs `--add-detail` saying why. `--decisions` slugs must already exist in the decision files.
 
-Write a ship line (appends to the project's ships file, or `--file`; `--dry-run` shows the line without writing):
+Write a ship line (goes under the anchor line `<!-- work-map: newest first -->` when the project's ships file, or `--file`, has one, else appends; a file with two anchors is refused; `--dry-run` shows the line without writing):
 
 ```
 python3 ${CLAUDE_PLUGIN_ROOT}/scripts/ships.py add --project reports --version v0.4.0 --sha 9f3c2ab --decisions keep-csv-export --tasks t-14,t-15

@@ -26,6 +26,10 @@ Ship line:
 <YYYY-MM-DD> · session: <id> · project: <repo> · shipped <version> <sha> · decisions: <slugs> · tasks closed: <ids>
 ```
 
+A decision that a later one replaces carries the field `SUPERSEDED by <new-slug>` directly after its own slug (`… · <old-slug> · SUPERSEDED by <new-slug> · <who> (…`). The reader gives it the status `superseded`, which is not open, and keeps `superseded_by` in `--json`. `decisions.py add --supersedes <old-slug>` writes the mark and the new line in one step.
+
+A log file (a ships file such as `DEVLOG.md`) can opt in to newest first by holding one anchor line, exactly `<!-- work-map: newest first -->` (surrounding spaces ignored). `ships.py add` then puts each new line directly below the anchor; a file with no anchor is appended to, and a file with two or more anchors is refused. A log `ships.py` creates starts `# <project> DEVLOG`, a blank line, the anchor, then the line. Decision files keep their append order and take no anchor.
+
 A decision may carry `kind: standing|one-time`: `standing` is a rule future work follows, `one-time` is a choice about one finished piece of work (or a record of something that happened). `from: unknown` gives no link.
 
 In list fields (`applies`, `decisions`, `tasks closed`), `none` means there are none and `unknown` means nobody recorded them; both give no link, and the source line keeps which was written.

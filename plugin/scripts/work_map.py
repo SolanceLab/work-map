@@ -83,6 +83,8 @@ def parse_decision(line, source):
             frm = "" if t[1].strip().lower() in ("", "unknown", "none") else t[1]
         elif t and t[0] == "kind":
             r["weight"] = t[1].strip()
+        elif not t and re.match(r"^SUPERSEDED by ([a-z0-9-]+)\b", f):  # the mark decisions.py add --supersedes writes
+            r["superseded_by"] = re.match(r"^SUPERSEDED by ([a-z0-9-]+)\b", f).group(1)
         elif not slug and not t:
             slug = f
     r["call"] = r.get("call", "")
@@ -91,7 +93,7 @@ def parse_decision(line, source):
     r["id"] = "decision:" + r["slug"]
     r["applies"], r["from"] = applies, frm
     r["project"] = frm or (applies[0] if applies else "unknown")
-    r["status"] = "standing"
+    r["status"] = "superseded" if r.get("superseded_by") else "standing"
     r["gist"] = r["call"] or r.get("who", "")
     r["text"] = " ".join([r["slug"], r.get("who", ""), r["call"], r["why"]])
     for p in applies:
@@ -391,6 +393,8 @@ def links_text(r):
 def public(r, full=False):
     d = {k: r[k] for k in ("kind", "id", "project", "session", "status", "date", "gist")}
     d["source"] = {"file": r["source"][0], "line": r["source"][1]}
+    if r.get("superseded_by"):
+        d["superseded_by"] = r["superseded_by"]
     links = {}
     for type_, target in r["links"]:
         links.setdefault(type_, []).append(target)
@@ -403,7 +407,7 @@ def public(r, full=False):
 def one_line(r):
     gist = r["gist"] if len(r["gist"]) <= 80 else r["gist"][:77] + "..."
     return "%s %s · %s · %s · %s · links: %s · source: %s:L%d" % (
-        r["kind"], r["id"], r["project"], r["status"] if r["kind"] != "decision" else r["date"] or r["status"],
+        r["kind"], r["id"], r["project"], r["status"] if r["kind"] != "decision" else (r["date"] or r["status"]) + (" superseded" if r["status"] == "superseded" else ""),
         gist, links_text(r), r["source"][0], r["source"][1])
 
 

@@ -4,9 +4,12 @@
 
   add   --slug S --applies a,b|house --from PROJECT --who NAME --time HH:MM --words "..." --call "..." --why "..."
         [--kind standing|one-time] [--date YYYY-MM-DD] [--session ID8] [--file P] [--config C] [--dry-run]
+        [--supersedes OLD-SLUG]   marks the old line "SUPERSEDED by <slug>" (same file, one atomic write)
   query TERMS... [--config C] [--file P]... [--notes P]... [--decision-words REGEX]...
         Lines matching ALL terms (case-insensitive); when none match and there are 2+ terms, the closest
-        lines matching at least half, tagged [k/n terms]. Exit 0 always: no match means "not decided on record".
+        lines matching at least half, tagged [k/n terms]. Newest date first; a replaced decision keeps its place
+        with a [superseded by <slug>] prefix; a cut list says "showing N of M; add a term to narrow".
+        Exit 0 always: no match means "not decided on record".
 
 Paths: decision files come from --file, else the config's "decisions" list (--config, else $WORK_MAP_CONFIG,
 else ./work-map.json; globs allowed, relative paths read from the config's folder), else ./DECISIONS.md.
@@ -18,8 +21,11 @@ import argparse, datetime, glob, json, math, os, re, sys, tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # the shared lock sits beside this script
 from _writelock import locked, confined
+import work_map
 
+LINE_DATE = re.compile(r"^\s*(?:[-*]\s+)?(\d{4}-\d{2}-\d{2})\b")
 ADD_LINE = re.compile(r'^- (?P<date>\d{4}-\d{2}-\d{2}) · session: (?P<session>.*?) · applies: \[(?P<applies>.*?)\] · from: (?P<project>.*?)(?: · kind: (?P<kind>standing|one-time))? · (?P<slug>[a-z0-9-]+) · (?P<who>.*?) \((?P<time>\d{2}:\d{2}) "(?P<words>.*?)"\) → (?P<call>.*?) · Why: (?P<why>.*)$')
+SUPERSEDED_FIELD = re.compile(r"SUPERSEDED by ([a-z0-9-]+)\b")
 DECISION = re.compile(r"(DECIDED|decided|chose|approved|her words|his words|their words)", re.I)
 
 
@@ -112,6 +118,11 @@ def restore_original(path, original):
         return False
 
 
+def slug_field_regex(slug):
+    """Matches the front of a decision line up to and including the slug field (and its separator)."""
+    return re.compile(r"^[-*] \d{4}-\d{2}-\d{2} · (?:session: .*? · applies: .*? · from: .*? · (?:kind: \S+ · )?)?" + re.escape(slug) + r" · ")
+
+
 def parse_add_line(line):
     match = ADD_LINE.fullmatch(line)
     return match.groupdict() if match else None
@@ -191,13 +202,27 @@ def query_command(argv):
         return 2
     notes = note_files(args.notes)
     sources = [(r, False) for r in regs] + [(n, True) for n in notes]
+    order = {path: n for n, (path, _) in enumerate(sources)}
+
+    def entry(path, i, full):
+        date = LINE_DATE.match(full)
+        rec = work_map.parse_decision(full, (path, i))
+        mark = "[superseded by %s] " % rec["superseded_by"] if rec and rec.get("superseded_by") else ""
+        return {"path": path, "line": i, "date": date.group(1) if date else "", "text": mark + full.strip()[:300]}
+
     found = []
     for path, only in sources:
-        found += [(path, i, l.strip()[:300]) for i, l in candidate_lines(path, only, extra)
+        found += [entry(path, i, l) for i, l in candidate_lines(path, only, extra)
                   if all(t in l.lower() for t in terms)]
     if found:
-        for path, i, l in found[:25]:
-            print("%s:%d  %s" % (label(path), i, l))
+        found.sort(key=lambda e: (order[e["path"]], -e["line"]))  # later line first within a file, config order across files
+        dated = sorted([e for e in found if e["date"]], key=lambda e: e["date"], reverse=True)  # stable: same-date ties keep that order
+        undated = sorted([e for e in found if not e["date"]], key=lambda e: (order[e["path"]], e["line"]))  # notes lines: current order
+        found = dated + undated
+        for e in found[:25]:
+            print("%s:%d  %s" % (label(e["path"]), e["line"], e["text"]))
+        if len(found) > 25:
+            print("showing 25 of %d; add a term to narrow" % len(found))
         return 0
     uniq = list(dict.fromkeys(terms))
     if len(uniq) >= 2:
@@ -207,13 +232,16 @@ def query_command(argv):
             for i, l in candidate_lines(path, only, extra):
                 k = sum(1 for t in uniq if t in l.lower())
                 if k >= need:
-                    part.append((k, path, i, l.strip()[:300]))
-        keyed = sorted(enumerate(part), key=lambda e: (-e[1][0], 0, -e[1][2], e[0]) if e[1][1] in regs
-                       else (-e[1][0], 1, 0, e[0]))
-        if keyed:
+                    part.append(dict(entry(path, i, l), k=k, group=0 if path in regs else 1))
+        part.sort(key=lambda e: -e["line"] if e["group"] == 0 else 0)  # later line first among register lines
+        part.sort(key=lambda e: e["date"], reverse=True)               # newest date first as the tie-break (undated last)
+        part.sort(key=lambda e: (-e["k"], e["group"]))                 # term count, then registers before notes
+        if part:
             print("No line matches every term; closest matches:")
-            for _, (k, path, i, l) in keyed[:15]:
-                print("[%d/%d terms] %s:%d  %s" % (k, len(uniq), label(path), i, l))
+            for e in part[:15]:
+                print("[%d/%d terms] %s:%d  %s" % (e["k"], len(uniq), label(e["path"]), e["line"], e["text"]))
+            if len(part) > 15:
+                print("showing 15 of %d; add a term to narrow" % len(part))
             return 0
     print("No decision on record for: %s" % " ".join(terms))
     return 0
@@ -229,6 +257,7 @@ def add_command(argv):
     parser.add_argument("--file")
     parser.add_argument("--config", default=default_config())
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--supersedes", metavar="OLD-SLUG")
     args = parser.parse_args(argv)
     fields = vars(args)
     for key, value in fields.items():
@@ -236,6 +265,11 @@ def add_command(argv):
             parser.error("%s contains a newline or reserved delimiter" % key)
     if not re.fullmatch(r"[a-z0-9-]+", args.slug):
         parser.error("invalid slug")
+    if args.supersedes is not None and not re.fullmatch(r"[a-z0-9-]+", args.supersedes):
+        parser.error("invalid slug in --supersedes")
+    if args.supersedes == args.slug:
+        print("refused: --supersedes names the new slug itself (%s)" % args.slug, file=sys.stderr)
+        return 2
     try:
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", args.date):
             raise ValueError()
@@ -278,18 +312,61 @@ def add_command(argv):
             with open(target, "rb") as f:
                 original = f.read()
             text = original.decode("utf-8")
-            slug_field = re.compile(r"^[-*] \d{4}-\d{2}-\d{2} · (?:session: .*? · applies: .*? · from: .*? · (?:kind: \S+ · )?)?" + re.escape(args.slug) + r" · ", re.M)
-            if slug_field.search(text):
+            if any(slug_field_regex(args.slug).match(r) for r in text.split("\n")):
                 parser.error("duplicate slug: " + args.slug)
+            new_data = original + ("\n" if original and not original.endswith(b"\n") else "").encode() + (line + "\n").encode("utf-8")
+            old_at = old_line = None
+            if args.supersedes:
+                old_field = slug_field_regex(args.supersedes)
+                rows = text.split("\n")
+                hits = [(n, old_field.match(r)) for n, r in enumerate(rows) if old_field.match(r)]
+                if not hits:
+                    elsewhere = None
+                    for other in ([] if args.file else decision_files(None, args.config)):
+                        if os.path.realpath(other) == target or not os.path.isfile(other):
+                            continue
+                        with open(other, encoding="utf-8", errors="replace") as fh:
+                            if any(old_field.match(r) for r in fh.read().split("\n")):
+                                elsewhere = other
+                                break
+                    if elsewhere:
+                        print("refused: %s is in %s, not in %s; this release marks within one file only" % (args.supersedes, elsewhere, target), file=sys.stderr)
+                    else:
+                        print("refused: no line with slug %s in %s" % (args.supersedes, target), file=sys.stderr)
+                    return 2
+                if len(hits) > 1:
+                    print("refused: slug %s is ambiguous in %s (lines %s)" % (args.supersedes, target, ", ".join(str(n + 1) for n, _ in hits)), file=sys.stderr)
+                    return 2
+                old_at, m = hits[0]
+                prior = SUPERSEDED_FIELD.match(rows[old_at][m.end():])
+                if prior:
+                    print("refused: %s is already superseded by %s" % (args.supersedes, prior.group(1)), file=sys.stderr)
+                    return 2
+                parsed = work_map.parse_decision(rows[old_at], (target, old_at + 1))
+                if not parsed or parsed["slug"] != args.supersedes:
+                    print("refused: line %d of %s is not a decision line the reader indexes" % (old_at + 1, target), file=sys.stderr)
+                    return 2
+                old_line = rows[old_at][:m.end()] + "SUPERSEDED by %s · " % args.slug + rows[old_at][m.end():]
+                rows[old_at] = old_line
+                head = "\n".join(rows).encode("utf-8")
+                new_data = head + ("\n" if head and not head.endswith(b"\n") else "").encode() + (line + "\n").encode("utf-8")
             if args.dry_run:
+                if old_line:
+                    print(old_line)
                 print(line)
                 return 0
             wrote = True
-            atomic_write(target, original + ("\n" if original and not original.endswith(b"\n") else "").encode() + (line + "\n").encode("utf-8"))
+            atomic_write(target, new_data)
             with open(target, encoding="utf-8") as f:
-                last = f.read().splitlines()[-1]
+                after = f.read()
+            last = after.splitlines()[-1]
             if parse_add_line(last) != data:
                 raise ValueError("written line failed parse-back")
+            if old_line:
+                back = after.split("\n")[old_at]
+                rec = work_map.parse_decision(back, (target, old_at + 1))
+                if back != old_line or not rec or rec["status"] != "superseded" or rec.get("superseded_by") != args.slug:
+                    raise ValueError("marked line failed parse-back")
         except BaseException as exc:  # any failure after the write (incl. Ctrl-C) puts the original back
             restored = restore_original(target, original) if wrote else True
             if not isinstance(exc, Exception):

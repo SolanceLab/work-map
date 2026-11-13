@@ -66,7 +66,7 @@ Your AI runs these for you through the skill. By hand, one command answers most 
 python3 plugin/scripts/work_map.py --config <file> query <words>
 ```
 
-`query` finds records, `open <id>` shows one with its links, `slice --project <p>` gives a project's latest, `inventory` checks for broken links. The writers (`decisions.py`, `pipeline.py`, `ships.py`) add and update lines. Every command and flag: [docs/commands.md](docs/commands.md).
+`query` finds records, `open <id>` shows one with its links, `slice --project <p>` gives a project's latest, `inventory` checks for broken links. The writers (`decisions.py`, `pipeline.py`, `ships.py`) add and update lines. Every command and flag: [docs/commands.md](docs/commands.md). A ships file with the line `<!-- work-map: newest first -->` gets each new line on top; `decisions.py add --supersedes <old-slug>` marks a replaced decision, and `decisions.py query` lists newest first and says when it cuts the list.
 
 ### The skill
 
