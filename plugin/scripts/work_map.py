@@ -2,14 +2,15 @@
 # work-map — Copyright (c) 2026 House of Solance. PolyForm Noncommercial 1.0.0. Required Notice: Copyright (c) 2026 House of Solance (https://github.com/SolanceLab)
 """work-map: read tagged lines (decisions, pipeline, tasks, ships) and link them into a graph.
 
-Python 3.9+, standard library only. Reads files only; writes nothing.
-Run:  python3 work_map.py --config <file> <index|query|open|slice|inventory> [--json]
+Python 3.9+, standard library only. Reads files and git history only; writes nothing.
+Run:  python3 work_map.py --config <file> <index|query|open|slice|inventory|why> [--json]
 """
 import argparse
 import glob
 import json
 import os
 import re
+import subprocess
 import sys
 
 WAITING = re.compile(r"waiting(-on-[a-z0-9][a-z0-9-]*)?")
@@ -593,6 +594,226 @@ def cmd_inventory(args, g):
     return 0
 
 
+# ---- why: commit -> work item -> decisions ----
+
+NOTES_REF = "refs/notes/work-map"
+APPROVAL = "publish-yes"
+GIT_FMT = ("%H%x1f%ad%x1f%s%x1f%(trailers:key=Work,valueonly,separator=%x2C)"
+           "%x1f%(trailers:key=Session,valueonly,separator=%x2C)"
+           "%x1f%(trailers:key=Decision,valueonly,separator=%x2C)%x1f%N%x1e")
+NOTES_ARGS = ["--no-notes", "--notes=" + NOTES_REF]  # only the work-map notes, never other note refs
+
+
+class GitError(Exception):
+    """git refused or is missing: why exits 2."""
+
+
+def git(cwd, *args):
+    env = dict(os.environ, GIT_OPTIONAL_LOCKS="0", GIT_PAGER="cat", LC_ALL="C")
+    try:
+        proc = subprocess.run(["git", "-C", cwd] + list(args), capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", env=env)
+    except FileNotFoundError:
+        raise GitError("git is not installed")
+    if proc.returncode != 0:
+        raise GitError((proc.stderr.strip().splitlines() or ["git failed"])[-1])
+    return proc.stdout
+
+
+def split_trailer(value):
+    """git joins repeated trailers with the separator: 'a,b, c' -> ['a', 'b', 'c'], first-seen order, no repeats."""
+    out = []
+    for part in value.split(","):
+        part = part.strip()
+        if part and part not in out:
+            out.append(part)
+    return out
+
+
+def is_approval(slug):
+    """An approval (publish-yes...) is a yes, not a reason: why never shows it."""
+    return slugify(slug).startswith(APPROVAL)
+
+
+def parse_note(text):
+    """A local git note: lines 'Work: a, b', 'Session: x', 'Decision: y' (keys in any case); other lines ignored."""
+    got = {"work": [], "session": [], "decision": []}
+    for line in text.splitlines():
+        key, sep, val = line.partition(":")
+        key = key.strip().lower()
+        if sep and key in got:
+            for v in split_trailer(val):
+                if v not in got[key]:
+                    got[key].append(v)
+    return got
+
+
+def merge_unique(first, second):
+    return first + [v for v in second if v not in first]
+
+
+def parse_log(out):
+    commits = []
+    for chunk in out.split("\x1e"):
+        chunk = chunk.strip("\n")
+        if not chunk:
+            continue
+        parts = chunk.split("\x1f")
+        parts += [""] * (7 - len(parts))
+        note = parse_note(parts[6])
+        commits.append({"sha": parts[0].strip(), "date": parts[1], "subject": parts[2],
+                        "work": merge_unique(split_trailer(parts[3]), note["work"]),
+                        "session": (split_trailer(parts[4]) or note["session"] or [""])[0],
+                        "decision": merge_unique(split_trailer(parts[5]), note["decision"])})
+    return commits
+
+
+def resolve_target(target, limit):
+    """(commits newest first, note). GitError means exit 2; an empty list means exit 1 (note says why, or "")."""
+    fmt = "--format=" + GIT_FMT
+    if os.path.isfile(target):
+        p = os.path.abspath(target)
+        return parse_log(git(os.path.dirname(p), "log", "--follow", "--date=short", *NOTES_ARGS, fmt,
+                             "-n", str(limit), "--", os.path.basename(p))), ""
+    m = re.fullmatch(r"(.+):(\d+)", target)
+    if m and os.path.isfile(m.group(1)):
+        n = int(m.group(2))
+        if n < 1:
+            raise GitError("line numbers start at 1")
+        p = os.path.abspath(m.group(1))
+        d, name = os.path.dirname(p), os.path.basename(p)
+        out = git(d, "blame", "-L", "%d,%d" % (n, n), "--porcelain", "--", name)
+        toks = out.split()
+        sha = toks[0] if toks else ""
+        if not sha or set(sha) == {"0"}:
+            return [], "line %d of %s is not committed yet" % (n, m.group(1))
+        return parse_log(git(d, "log", "-1", "--date=short", *NOTES_ARGS, fmt, sha)), ""
+    if os.path.isdir(target):
+        raise GitError("why needs a commit, a file or file:LINE, not a folder: " + target)
+    cwd = os.getcwd()
+    try:
+        sha = git(cwd, "rev-parse", "--verify", "--quiet", "--end-of-options", target + "^{commit}").strip()
+    except GitError:
+        raise GitError("not a commit or a file: " + target)
+    if not sha:
+        raise GitError("not a commit or a file: " + target)
+    return parse_log(git(cwd, "log", "-1", "--date=short", *NOTES_ARGS, fmt, sha)), ""
+
+
+def find_items(records, work_id):
+    """Every pipeline record a Work id matches; the caller decides what several matches mean."""
+    wid = work_id[len("pipeline:"):] if work_id.startswith("pipeline:") else work_id
+    items = [r for r in records if r.get("kind") == "pipeline"]
+    if "/" in wid:
+        proj, iid = wid.split("/", 1)
+        full = "pipeline:%s/%s" % (canonical_name(records, proj), iid)
+        hits = [r for r in items if r["id"] == full]
+    else:
+        hits = [r for r in items if r["id"].split("/", 1)[-1] == wid]
+    out, seen = [], set()
+    for r in hits:  # the same item listed in two files is one work item
+        if r["id"] not in seen:
+            seen.add(r["id"])
+            out.append(r)
+    return out
+
+
+def find_decision(records, slug):
+    s = slugify(slug)
+    hits = [r for r in records if r.get("kind") == "decision" and r.get("slug") == s]
+    return next((r for r in hits if r.get("status") != "superseded"), hits[0] if hits else None)
+
+
+def decision_view(records, slug):
+    dec = find_decision(records, slug)
+    return {"id": "decision:" + slugify(slug), "found": dec is not None,
+            "call": dec.get("call", "") if dec else "", "why": dec.get("why", "") if dec else ""}
+
+
+def work_chain(records, work_id):
+    chain = {"id": work_id, "found": False, "title": "", "status": "", "why": "", "spec": "",
+             "decisions": [], "record": None, "session": "", "ambiguous": []}
+    hits = find_items(records, work_id)
+    if len(hits) > 1:
+        chain["ambiguous"] = [h["id"] for h in hits]
+    elif hits:
+        r = hits[0]
+        chain.update(found=True, title=r.get("title", ""), status=r.get("status", ""), why=r.get("why", ""),
+                     spec="" if r.get("spec", "none") in ("none", "") else r["spec"], record=r["id"],
+                     session="" if r.get("session", "unknown") == "unknown" else r["session"])
+        chain["decisions"] = [decision_view(records, d) for d in r.get("decisions", []) if not is_approval(d)]
+    return chain
+
+
+def cmd_why(args, g):
+    records = g[0]
+    if args.limit < 1:
+        print("work_map: why: --limit must be 1 or more", file=sys.stderr)
+        return 2
+    try:
+        commits, note = resolve_target(args.target, args.limit)
+    except GitError as e:
+        print("work_map: why: %s" % e, file=sys.stderr)
+        return 2
+    if not commits:
+        emit(args, [], [note or "no commits found for " + args.target])
+        return 1
+    payload, lines, shown, bare = [], [], set(), 0
+    for c in commits:
+        direct = [d for d in c["decision"] if not is_approval(d)]
+        if not c["work"] and not direct:
+            bare += 1
+            continue
+        chains = [work_chain(records, w) for w in c["work"]]
+        decs = [decision_view(records, d) for d in direct]
+        session = c["session"] or next((ch["session"] for ch in chains if ch["session"]), "")
+        works = []
+        for ch in chains:
+            w = dict(id=ch["id"], found=ch["found"], title=ch["title"], status=ch["status"], why=ch["why"],
+                     spec=ch["spec"], decisions=[dict(id=d["id"], call=d["call"], why=d["why"]) for d in ch["decisions"]])
+            if ch["ambiguous"]:
+                w["ambiguous"] = ch["ambiguous"]
+            works.append(w)
+        payload.append(dict(commit=c["sha"], date=c["date"], subject=c["subject"], work=works,
+                            decisions=[dict(id=d["id"], found=d["found"], call=d["call"], why=d["why"]) for d in decs],
+                            session=session or None))
+        lines.append("commit %s · %s · %s" % (c["sha"][:7], c["date"], c["subject"]))
+        for d in decs:
+            lines += decision_lines(d, "  ")
+        for ch in chains:
+            if ch["ambiguous"]:
+                lines.append("  work: %s (ambiguous: %s; write <project>/<id>)" % (ch["id"], ", ".join(ch["ambiguous"])))
+            elif not ch["found"]:
+                lines.append("  work: %s (not in the record)" % ch["id"])
+            elif ch["record"] in shown:
+                lines.append("  work: %s (above)" % ch["id"])
+            else:
+                shown.add(ch["record"])
+                lines.append("  %s · %s · %s" % (ch["record"], ch["title"], ch["status"]))
+                if ch["why"]:
+                    lines.append("    why: " + ch["why"])
+                for d in ch["decisions"]:
+                    lines += decision_lines(d, "    ", "")
+                if ch["spec"]:
+                    lines.append("    spec: " + ch["spec"])
+        if session:
+            lines.append("  session: " + session)
+    if bare:
+        lines.append("%d commits without a Work line" % bare)
+    emit(args, payload, lines)
+    return 0
+
+
+def decision_lines(d, indent, label="decision: "):
+    if not d["found"]:
+        return ["%s%s%s (not in the record)" % (indent, label, d["id"][len("decision:"):] if label else d["id"])]
+    name = d["id"][len("decision:"):] if label else d["id"]
+    out = ["%s%s%s · %s" % (indent, label, name, d["call"])]
+    if d["why"]:
+        out.append("%s  why: %s" % (indent, d["why"]))
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="work_map", description=__doc__.splitlines()[0])
     ap.add_argument("--config", default=os.environ.get("WORK_MAP_CONFIG"),
@@ -613,6 +834,9 @@ def main(argv=None):
     s.add_argument("--house-limit", type=int, default=3,
                    help="house-wide records appended to a project slice (default: 3; 0 disables)")
     sub.add_parser("inventory", parents=[shared], help="counts per kind and file, problems")
+    w = sub.add_parser("why", parents=[shared], help="from a commit, file or file:LINE back to the reasons it exists")
+    w.add_argument("target")
+    w.add_argument("--limit", type=int, default=20, help="commits read for a file (default 20)")
     args = ap.parse_args(argv)
     try:
         sources, base = load_config(args.config)
@@ -622,7 +846,7 @@ def main(argv=None):
     records, files, excluded = load_all(sources, base)
     g = (records, files, excluded, build_graph(records))
     return {"index": cmd_index, "query": cmd_query, "open": cmd_open,
-            "slice": cmd_slice, "inventory": cmd_inventory}[args.cmd](args, g) or 0
+            "slice": cmd_slice, "inventory": cmd_inventory, "why": cmd_why}[args.cmd](args, g) or 0
 
 
 if __name__ == "__main__":

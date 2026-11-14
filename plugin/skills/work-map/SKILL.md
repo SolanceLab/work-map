@@ -1,6 +1,7 @@
 ---
 name: work-map
-description: Write decisions, pipeline items, tasks and ship lines in the tagged shapes work-map can read. Use when the user makes a decision, has a new idea or plan, opens or closes a task, or ships something, and when starting a session that should load what is open.
+description: >-
+  Write decisions, pipeline items, tasks and ship lines in the tagged shapes work-map can read, and answer why a piece of code exists. Use when the user makes a decision, has a new idea or plan, opens or closes a task, or ships something; when starting a session that should load what is open; and when someone asks why a file, a line or a commit is the way it is, what it was for, or what decision it came from (work-map why follows the commit back to the work item and its reasons).
 ---
 
 # work-map
@@ -99,6 +100,12 @@ Write it with `ships.py add` (above): it checks the shape and refuses a second l
 
 Separate several slugs or ids with commas.
 
+## 5. Commit links (local note by default)
+
+Put the links in a LOCAL git note by default: `git notes --ref=work-map add -m "Work: <id>" -m "Session: <id>" <sha>`. Notes stay on this computer; a normal `git push` does not send them; never push `refs/notes/work-map`. `why` reads the note lines `Work:`, `Session:` and `Decision:` (comma separated values, keys in any case) together with any trailers and merges them without duplicates; a trailer `Session` wins over the note's. Put the links in the commit message as trailers ONLY in a repository you know is private. Never in a public repository's commit messages: work names and session ids are private, and a pushed commit message is permanent.
+
+Only in a repository you know is private, you may instead put the links in the commit message: when a commit carries out a pipeline item, end the message with ONE final trailer paragraph (all trailers together, nothing after them; git reads trailers only from the last paragraph): `Work: <item id>` lines (one per item) and `Session: <your 8-character session id>`. `Work` is the main trailer; `Decision: <slug>` is optional, for a decision the commit carries out directly; `Session` is optional. Use `<project>/<id>` whenever the id might exist in another project. Never put an approval (`publish-yes...`) there; `why` never shows approvals.
+
 ## Reading it back
 
-`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/work_map.py --config <config> slice --project <p> --limit 10` shows the newest open items for one project (use `--house` for house-wide decisions) so a session can start lean. `query <text>` finds items by id, project or words; `open <id>` shows one item with all its links.
+`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/work_map.py --config <config> slice --project <p> --limit 10` shows the newest open items for one project (use `--house` for house-wide decisions) so a session can start lean. `query <text>` finds items by id, project or words; `open <id>` shows one item with all its links; `why <commit|file|file:LINE>` follows a commit's trailers back to the item, its why and the decisions it rests on.

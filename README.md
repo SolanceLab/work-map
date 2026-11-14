@@ -66,7 +66,7 @@ Your AI runs these for you through the skill. By hand, one command answers most 
 python3 plugin/scripts/work_map.py --config <file> query <words>
 ```
 
-`query` finds records, `open <id>` shows one with its links, `slice --project <p>` gives a project's latest, `inventory` checks for broken links. The writers (`decisions.py`, `pipeline.py`, `ships.py`) add and update lines. Every command and flag: [docs/commands.md](docs/commands.md). A ships file with the line `<!-- work-map: newest first -->` gets each new line on top; `decisions.py add --supersedes <old-slug>` marks a replaced decision, and `decisions.py query` lists newest first and says when it cuts the list.
+`query` finds records, `open <id>` shows one with its links, `slice --project <p>` gives a project's latest, `inventory` checks for broken links, `why <commit|file|file:LINE>` follows a commit's `Work:` trailer back to the pipeline item, its why and the decisions it rests on. The writers (`decisions.py`, `pipeline.py`, `ships.py`) add and update lines. Every command and flag: [docs/commands.md](docs/commands.md). A ships file with the line `<!-- work-map: newest first -->` gets each new line on top; `decisions.py add --supersedes <old-slug>` marks a replaced decision, and `decisions.py query` lists newest first and says when it cuts the list.
 
 ### The skill
 
@@ -77,11 +77,12 @@ Installing the plugin also gives your AI the work-map skill. It keeps the record
 - Reads UTF-8 text files and JSON only; the config is JSON, or TOML on Python 3.11 or newer.
 - Only the four line shapes in [docs/record-format.md](docs/record-format.md) are parsed; any other line is ignored.
 - `query` prints every match; `slice` stops at `--limit` (default 20 for the project, `--house-limit` default 3 for house-wide decisions).
+- `why` needs git 2.22+ on PATH and reads only commits that carry a `Work:` or `Decision:` trailer; others are counted.
 - The writers are guarded against writing outside your folder and against two writers at once; the exact limits of both: [docs/settings.md](docs/settings.md#writer-safety-limits).
 
 ## How it works
 
-work-map reads the files you list in its settings each time you ask. It keeps nothing between runs and writes nothing.
+work-map reads the files you list in its settings each time you ask. It keeps nothing between runs and writes nothing; `why` also reads your git history.
 
 Each record is one plain line with tags separated by ` · `: a decision, a pipeline item, a task or a ship. From those tags alone, work-map ties the lines together: a decision to the projects it applies to, a pipeline item to its project and its spec, a ship to the tasks it closed. A line it cannot fully read is still kept, marked `unknown`.
 

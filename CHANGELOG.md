@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0
+
+- `work_map.py why <commit|file|file:LINE>` follows a commit back to the reasons it exists: the pipeline item in its `Work:` trailer, that item's why, the decisions it rests on (approvals such as `publish-yes...` are left out), its spec and session. An optional `Decision: <slug>` trailer shows that decision directly. A bare id shared by two projects is reported as ambiguous. Read-only; a git refusal exits 2, a target with no committed history exits 1.
+- `why` also reads the same links from a local git note (`refs/notes/work-map`, `git notes --ref=work-map add -m "Work: <id>" <sha>`), so public repositories never put them in commit messages; trailer and note values merge.
+- Commit trailers `Work:`, `Decision:` and `Session:` documented in the contract, the record format and the skill.
+
 ## 0.3.0
 
 - `ships.py add` puts the new line directly under the anchor line `<!-- work-map: newest first -->` when the file has one (appends when it has none; refuses a file with two). A ships file it creates starts with the anchor.

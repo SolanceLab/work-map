@@ -26,6 +26,19 @@ Ship line:
 <YYYY-MM-DD> · session: <id> · project: <repo> · shipped <version> <sha> · decisions: <slugs> · tasks closed: <ids>
 ```
 
+Commit links (read by `why`): Put the links in a LOCAL git note by default: `git notes --ref=work-map add -m "Work: <id>" -m "Session: <id>" <sha>`. Notes stay on this computer; a normal `git push` does not send them; never push `refs/notes/work-map`. `why` reads the note lines `Work:`, `Session:` and `Decision:` (comma separated values, keys in any case) together with any trailers and merges them without duplicates; a trailer `Session` wins over the note's. Put the links in the commit message as trailers ONLY in a repository you know is private. Never in a public repository's commit messages: work names and session ids are private, and a pushed commit message is permanent.
+
+Trailer form, for a private repository only: end a commit message with one final trailer paragraph, all trailers together (git reads trailers only from the last paragraph). `Work` is the main trailer, `Decision` is optional, `Session` is optional. Approvals (`publish-yes...`) are never shown.
+
+```
+Add the weekly digest email
+
+Work: weekly-digest
+Session: a1b2c3d4
+```
+
+`Work: <item-id>` or `Work: <project>/<item-id>` (optionally `pipeline:` first); repeat the line or separate ids with commas. Use `<project>/<item-id>` when two projects share an item id, because a bare shared id is reported as ambiguous. `Decision: <slug>` names a decision the commit carries out directly.
+
 A decision that a later one replaces carries the field `SUPERSEDED by <new-slug>` directly after its own slug (`… · <old-slug> · SUPERSEDED by <new-slug> · <who> (…`). The reader gives it the status `superseded`, which is not open, and keeps `superseded_by` in `--json`. `decisions.py add --supersedes <old-slug>` writes the mark and the new line in one step.
 
 A log file (a ships file such as `DEVLOG.md`) can opt in to newest first by holding one anchor line, exactly `<!-- work-map: newest first -->` (surrounding spaces ignored). `ships.py add` then puts each new line directly below the anchor; a file with no anchor is appended to, and a file with two or more anchors is refused. A log `ships.py` creates starts `# <project> DEVLOG`, a blank line, the anchor, then the line. Decision files keep their append order and take no anchor.
