@@ -7,7 +7,17 @@ the file byte-for-byte on any failure. Python 3.9+, standard library only.
   add    --project ID --item T --id SLUG --status S --why W [--spec P] [--decisions a,b]
          [--worker NAME] [--detail L]... [--file P] [--config C] [--decisions-file P]... [--dry-run]
   update (--file P | --project ID) --id SLUG [--status S] [--devlog YYYY-MM-DD] [--add-detail L] [--config C]
-  check  FILE...
+  check  [--config C] FILE...      (item lines, and root lines of a map file)
+  root add    --name N --id ID --access A --status S --why W [--aka a,b] [--pipeline PATH | --spec PATH]
+              [--file P] [--config C] [--dry-run]
+  root update --id ID [--access A] [--status S] [--pipeline PATH] [--spec PATH] [--why W] [--aka a,b] [--add-detail L]... [--file P] [--config C] [--dry-run]
+Root lines (the map file, one per project or idea) carry two tags.
+  access: public (others have it), going-public (private now, meant for the public), house (ours only), none (not built).
+  status: workbench (at most the config's "workbench_limit", default 3), waiting (known work, not on the bench),
+          idea (not started), settled (finished, nothing open), dropped.
+workbench, waiting and settled need a pipeline pointer ("none" is not enough); an idea needs a spec or pipeline
+pointer ("none" when it has none); dropped needs no pointer. A line still carrying an old status (live, building,
+later, closed, planned, parked) or no access tag stays readable and is held only to the pointer-path rules.
 Status: idea, planned, building, waiting, waiting-on-<name>, parked, done, dropped.
 Paths: --config, else $WORK_MAP_CONFIG, else ./work-map.json (its "pipeline", "map" and "decisions"
 lists; globs allowed, relative paths read from the config's folder). Without a config, pass --file.
@@ -16,6 +26,7 @@ import argparse, contextlib, datetime, glob, hashlib, json, os, re, sys, tempfil
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # the shared lock sits beside this script
 import _writelock
+import work_map  # the one place the root-line rules live (root_problems)
 from _writelock import locked, _private_lock_dir, confined
 fcntl = _writelock.fcntl
 
@@ -439,9 +450,19 @@ def update(argv):
         return commit(path, original, new, lambda ls: matches(ls, a.id, want, details, section))
 
 
-def check(files):
+def check(argv):
+    p = argparse.ArgumentParser(prog="pipeline.py check")
+    p.add_argument("--config")
+    p.add_argument("files", nargs="+")
+    a = p.parse_args(argv)
+    cfg = given_config(a.config) or ("work-map.json" if os.path.isfile("work-map.json") else None)
+    try:
+        limit = work_map.config_workbench_limit(cfg) if cfg and os.path.isfile(cfg) else work_map.DEFAULT_WORKBENCH_LIMIT
+    except work_map.ConfigError as exc:
+        raise Refusal(str(exc))
     bad = 0
-    for path in files:
+    bench = []  # every workbench root across all the map files, so the limit is counted once, not per file
+    for path in a.files:
         try:
             with open(path, encoding="utf-8") as fh:
                 lines = fh.read().split("\n")
@@ -450,8 +471,10 @@ def check(files):
             bad += 1
             continue
         seen = {}
+        base = os.path.dirname(os.path.abspath(cfg)) if cfg and os.path.isfile(cfg) else os.path.dirname(os.path.abspath(path))
+        bad += check_roots(path, lines, base, limit, bench)
         for n, l in enumerate(lines, 1):
-            if not l.startswith("- **"):
+            if not l.startswith("- **") or is_root(l):
                 continue
             f = parse_item_line(l)
             if f is None:
@@ -467,17 +490,282 @@ def check(files):
                 if f["id"] in seen:
                     print("%s:%d: duplicate id %s (first at line %d)" % (path, n, f["id"], seen[f["id"]])); bad += 1
                 seen.setdefault(f["id"], n)
+    if len(bench) > limit:
+        for p in work_map.root_problems([{"id": i, "status": "workbench", "pipeline": "none"} for i in bench], "", limit):
+            if p["type"] == "workbench-over-limit":
+                print("%s" % work_map.problem_line(p)); bad += 1
     return 1 if bad else 0
+
+
+# ---- root lines: one line per project or idea in the map file ----
+
+ROOT_ORDER = ["id", "access", "status", "aka", "pipeline", "spec", "why"]
+ROOT_ACCESS = list(work_map.ROOT_ACCESS)
+ROOT_STATUSES = list(work_map.ROOT_STATUSES)
+# statuses written before the two-tag line (15 Nov); readable until converted, never written new
+OLD_ROOT_STATUSES = ("live", "building", "later", "closed", "planned", "parked")
+ROOT_KEYS = ROOT_ORDER
+
+
+def parse_root_line(line):
+    """Root line -> ({'name', <field>...}, [keys in written order]) or None. Same split as the reader."""
+    m = ITEM.match(line)
+    if not m:
+        return None
+    out, order, last = {"name": m.group("item")}, [], None
+    for part in m.group("rest").split(" · "):
+        km = re.match(r"^(%s): (.*)$" % "|".join(ROOT_KEYS), part)
+        if km and km.group(1) not in out:
+            last = km.group(1)
+            out[last] = km.group(2)
+            order.append(last)
+        elif last:
+            out[last] += " · " + part
+        else:
+            return None
+    return out, order
+
+
+def format_root(f, order):
+    keys = list(order)
+    for k in ("pipeline", "spec"):  # a pointer new to the line goes before why, where add puts it
+        if k in f and k not in keys:
+            keys.insert(keys.index("why") if "why" in keys else len(keys), k)
+    keys += [k for k in ROOT_ORDER if k not in keys and k in f]
+    return "- **%s** · %s" % (f["name"], " · ".join("%s: %s" % (k, f[k]) for k in keys if f.get(k) is not None))
+
+
+def config_map_files(config):
+    return config_paths(config, "map") if config and os.path.isfile(config) else []
+
+
+def roots_in(path):
+    """[(line_no, fields)] for the root lines of a map file."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return roots_in_lines(fh.read().split("\n"))
+    except (OSError, UnicodeError):
+        return []
+
+
+def root_target(a):
+    """(map file path, config path or None, folder pointers resolve from, workbench limit, all root lines of the config's map files)."""
+    cfg = given_config(a.config) or ("work-map.json" if os.path.isfile("work-map.json") else None)
+    if a.file:
+        path = a.file
+    else:
+        files = config_map_files(cfg)
+        if not files:
+            raise Refusal("no map file in the config; pass --file")
+        path = files[0]
+    path = os.path.realpath(path)
+    if not a.file:
+        confine_or_refuse([path], implicit_base(a.config))
+    try:
+        limit = work_map.config_workbench_limit(cfg) if cfg and os.path.isfile(cfg) else work_map.DEFAULT_WORKBENCH_LIMIT
+    except work_map.ConfigError as exc:
+        raise Refusal(str(exc))
+    base = os.path.dirname(os.path.abspath(cfg)) if cfg and os.path.isfile(cfg) else os.path.dirname(path)
+    others = [os.path.realpath(m) for m in config_map_files(cfg)]
+    return path, base, limit, [m for m in others if m != path]
+
+
+def root_rules(f, was_bench, base, limit, bench_ids, status_given, access_given=False):
+    """Refuse (one line) a root line that breaks the access, status, pointer and workbench rules; f is the line as it would be written.
+    A line that keeps an old status (live, building, later ...) or has no access tag is only held to the pointer-path rules."""
+    st = f.get("status", "")
+    # whole-line check: an access tag on the line must be valid, and only the listed old statuses are grandfathered
+    if (access_given or "access" in f) and f.get("access") not in ROOT_ACCESS:
+        raise Refusal("access must be one of: " + " ".join(ROOT_ACCESS))
+    if (status_given or st not in OLD_ROOT_STATUSES) and st not in ROOT_STATUSES:
+        raise Refusal("status must be one of: " + " ".join(ROOT_STATUSES))
+    if status_given and "access" not in f:
+        raise Refusal("a line moving to status %s needs --access (%s)" % (st, " ".join(ROOT_ACCESS)))
+    old = st not in ROOT_STATUSES or "access" not in f
+    if st == "workbench" and not was_bench and len(bench_ids) >= limit:
+        raise Refusal("the workbench is full (limit %d): %s. Move one off the workbench first" % (limit, ", ".join(bench_ids)))
+    pl, sp = f.get("pipeline"), f.get("spec")
+    if pl is not None and sp is not None:
+        raise Refusal("a root line takes pipeline or spec, not both")
+    if old:
+        pass
+    elif st in work_map.NEW_PROJECT_STATUSES and pl in (None, "none"):
+        raise Refusal("status %s needs --pipeline <path to the project's own PIPELINE> (none is not enough)" % st)
+    elif st == "idea" and pl is None and sp is None:
+        raise Refusal("status idea needs --spec <path> or --pipeline <path> (write none when there is none)")
+    for k, v in (("pipeline", pl), ("spec", sp)):
+        if v is not None:
+            if not v.strip():
+                raise Refusal("--%s cannot be empty" % k)
+            if v != "none" and not os.path.exists(v if os.path.isabs(v) else os.path.join(base, v)):
+                raise Refusal("%s path does not exist: %s (resolved from %s)" % (k, v, base))
+
+
+def root_matches(lines, rid, want):
+    for l in lines:
+        got = parse_root_line(l) if l.startswith("- **") else None
+        if got and got[0].get("id") == rid:
+            return all(got[0].get(k) == v for k, v in want.items())
+    return False
+
+
+def root_cmd(argv):
+    if not argv or argv[0] not in ("add", "update"):
+        raise Refusal("root needs add or update")
+    adding = argv[0] == "add"
+    p = argparse.ArgumentParser(prog="pipeline.py root " + argv[0])
+    if adding:
+        p.add_argument("--name", required=True)
+        p.add_argument("--id", required=True)
+        p.add_argument("--access", required=True)
+        p.add_argument("--status", required=True)
+        p.add_argument("--why", required=True)
+        p.add_argument("--aka", default="none")
+    else:
+        p.add_argument("--id", required=True)
+        p.add_argument("--access")
+        p.add_argument("--status")
+        p.add_argument("--why")
+        p.add_argument("--aka")
+        p.add_argument("--add-detail", action="append", default=[])
+    p.add_argument("--pipeline")
+    p.add_argument("--spec")
+    p.add_argument("--file")
+    p.add_argument("--config")
+    p.add_argument("--dry-run", action="store_true")
+    a = p.parse_args(argv[1:])
+    no_reserved(id=a.id, access=a.access or "", status=a.status or "", why=a.why or "", pipeline=a.pipeline or "", spec=a.spec or "",
+                name=getattr(a, "name", ""), aka=getattr(a, "aka", "") or "", add_detail=getattr(a, "add_detail", []))
+    if a.pipeline is not None and a.spec is not None:
+        raise Refusal("a root line takes pipeline or spec, not both")
+    if adding:
+        if not re.fullmatch(r"[a-z0-9-]+", a.id):
+            raise Refusal("invalid id (use a-z, 0-9, -)")
+        if not a.name.strip() or not a.why.strip():
+            raise Refusal("name and why cannot be empty")
+        if a.access not in ROOT_ACCESS:
+            raise Refusal("access must be one of: " + " ".join(ROOT_ACCESS))
+        if a.status not in ROOT_STATUSES:
+            raise Refusal("status must be one of: " + " ".join(ROOT_STATUSES))
+    path, base, limit, others = root_target(a)
+    with locked(path):
+        original = read_bytes(path)
+        if original is None:
+            if adding and a.file:
+                text = "# Root\n"
+            else:
+                raise Refusal("no such file: " + path)
+        else:
+            text = to_text(original)
+        lines = text.split("\n")
+        mine = {f["id"]: (n, f) for n, f in roots_in_lines(lines)}
+        elsewhere = [f for o in others for _, f in roots_in(o)]
+        bench = [rid for rid, (_, f) in mine.items() if f.get("status") == "workbench"] + \
+                [f["id"] for f in elsewhere if f.get("status") == "workbench"]
+        if adding:
+            if a.id in mine or any(f["id"] == a.id for f in elsewhere):
+                raise Refusal("duplicate id: " + a.id)
+            f = {"name": a.name, "id": a.id, "access": a.access, "status": a.status, "aka": ", ".join(x.strip() for x in a.aka.split(",") if x.strip()) or "none", "why": a.why}
+            order = list(ROOT_ORDER)
+            if a.pipeline is not None:
+                f["pipeline"] = a.pipeline
+            if a.spec is not None:
+                f["spec"] = a.spec
+            root_rules(f, False, base, limit, bench, True, True)
+            line = format_root(f, [k for k in ROOT_ORDER if k in f])
+            last = max([n for n, _ in roots_in_lines(lines)] or [0])
+            if last:  # after the last root line and its indented details
+                i = last
+                while i < len(lines) and re.match(r"^\s+\S", lines[i]):
+                    i += 1
+                lines[i:i] = [line]
+            else:
+                while lines and lines[-1] == "":
+                    lines.pop()
+                lines += ["", line, ""] if len(lines) > 1 else [line, ""]
+        else:
+            if a.id not in mine:
+                hit = [o for o in others if any(f["id"] == a.id for _, f in roots_in(o))]
+                raise Refusal("unknown id: " + a.id + (" (it is in %s; pass --file)" % hit[0] if hit else ""))
+            n, f = mine[a.id]
+            order = parse_root_line(lines[n - 1])[1]
+            was_bench = f.get("status") == "workbench"
+            if a.access is not None:
+                f["access"] = a.access
+                if "access" not in order:
+                    order.insert(order.index("status") if "status" in order else len(order), "access")
+            if a.status:
+                f["status"] = a.status
+            if a.why:
+                f["why"] = a.why
+            if a.aka is not None:
+                if not a.aka.strip():
+                    raise Refusal("--aka cannot be empty (write none)")
+                f["aka"] = a.aka
+                if "aka" not in order:
+                    order.insert(order.index("status") + 1 if "status" in order else len(order), "aka")
+            for d in a.add_detail:
+                if not d.strip() or "\n" in d:
+                    raise Refusal("--add-detail must be one non-empty line")
+            if a.pipeline is not None:  # a new pointer replaces the other kind (an idea promoted to a project)
+                f["pipeline"] = a.pipeline
+                f.pop("spec", None)
+                order = [k for k in order if k != "spec"]
+            if a.spec is not None:
+                f["spec"] = a.spec
+                f.pop("pipeline", None)
+                order = [k for k in order if k != "pipeline"]
+            # every update checks the whole line, so a why-only edit cannot re-save a line that breaks the rules
+            root_rules(f, was_bench, base, limit, [b for b in bench if b != a.id], bool(a.status), a.access is not None)
+            line = format_root(f, order)
+            lines[n - 1] = line
+            if a.add_detail:  # new details go after the line's existing indented details
+                end = n
+                while end < len(lines) and re.match(r"^\s+-\s+\S", lines[end]):  # same detail shape as the reader (work_map DETAIL)
+                    end += 1
+                lines[end:end] = ["  - " + d for d in a.add_detail]
+        if a.dry_run:
+            print(line)
+            return 0
+        want = {k: v for k, v in f.items() if k != "name"}
+        return commit(path, original, "\n".join(lines), lambda ls: root_matches(ls, a.id, want))
+
+
+def is_root(line):
+    got = parse_root_line(line)
+    return bool(got and "id" in got[0] and "aka" in got[0])
+
+
+def roots_in_lines(lines):
+    out = []
+    for n, l in enumerate(lines, 1):
+        if l.startswith("- **") and is_root(l):
+            out.append((n, parse_root_line(l)[0]))
+    return out
+
+
+def check_roots(path, lines, base, limit, bench):
+    """Print one line per root-line problem (same rules as `work_map.py inventory`); returns how many.
+    The workbench limit is not judged here: workbench ids go into `bench` and check() counts them across all files."""
+    roots = [dict(f) for _, f in roots_in_lines(lines) if f.get("status")]
+    bench.extend(r["id"] for r in roots if r["status"] == "workbench" and r["id"] not in bench)
+    n = 0
+    for p in work_map.root_problems(roots, base, 10 ** 9):
+        print("%s: %s" % (path, work_map.problem_line(p)))
+        n += 1
+    return n
 
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
-    if not argv or argv[0] not in ("add", "update", "check"):
+    if not argv or argv[0] not in ("add", "update", "check", "root"):
         print(__doc__)
         return 0
     try:
         if argv[0] == "check":
             return check(argv[1:])
+        if argv[0] == "root":
+            return root_cmd(argv[1:])
         return (add if argv[0] == "add" else update)(argv[1:])
     except Refusal as r:
         print("refused: %s" % r, file=sys.stderr)

@@ -144,7 +144,142 @@ class WhyTests(unittest.TestCase):
         code, out, _ = self.why(sha)
         self.assertEqual(code, 0)
         self.assertNotIn("pipeline:demo/alpha", out)
-        self.assertIn("1 commits without a Work line", out)
+        self.assertIn("1 commits without a Work line or DEVLOG mention", out)
+
+    def with_devlog(self, text):
+        path = os.path.join(self.tmp, "DEVLOG.md")
+        with open(path, "w") as fh:
+            fh.write(text)
+        with open(self.cfg) as fh:
+            cfg = json.load(fh)
+        cfg["ships"] = [path]
+        with open(self.cfg, "w") as fh:
+            json.dump(cfg, fh)
+
+    def test_checkpoint_with_commit_found_by_why_end_to_end(self):
+        sha = self.commit("cp1.txt", "n\n", "Checkpointed change")
+        path = os.path.join(self.tmp, "DEVLOG.md")
+        with open(path, "w") as fh:
+            fh.write("# demo DEVLOG\n\n<!-- work-map: newest first -->\n")
+        with open(self.cfg) as fh:
+            cfg = json.load(fh)
+        cfg["ships"] = [path]
+        with open(self.cfg, "w") as fh:
+            json.dump(cfg, fh)
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "plugin", "scripts", "ships.py"), "checkpoint",
+                            "--project", "demo", "--text", "the change landed", "--commit", sha, "--date", "2026-11-15",
+                            "--session", "a1b2c3d4", "--config", self.cfg], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        _, out, _ = self.why(sha)
+        self.assertIn("devlog: DEVLOG.md:L4 · - 2026-11-15 · session: a1b2c3d4 · project: demo · the change landed · proof: commit %s" % sha[:7], out)
+
+    def test_devlog_fallback_shown_and_not_counted(self):
+        sha = self.commit("dl1.txt", "n\n", "Old change")
+        self.with_devlog("<!-- work-map: newest first -->\n- fixed the thing in %s because reasons\n" % sha[:7])
+        code, out, _ = self.why(sha)
+        self.assertEqual(code, 0)
+        self.assertIn("commit %s" % sha[:7], out)
+        self.assertIn("  devlog: DEVLOG.md:L2 · - fixed the thing in %s because reasons" % sha[:7], out)
+        self.assertNotIn("without a Work line", out)
+        data = json.loads(self.why(sha, "--json")[1])
+        self.assertEqual(data[0]["devlog"][0]["line"], 2)
+
+    def test_devlog_short_sha_inside_longer_hex_not_matched(self):
+        sha = self.commit("dl2.txt", "n\n", "Other change")
+        other = sha[:7] + ("0" if sha[7] != "0" else "1") + "abc"
+        self.with_devlog("- see %s and a%s\n" % (other, sha[:7]))
+        _, out, _ = self.why(sha)
+        self.assertNotIn("devlog:", out)
+        self.assertIn("1 commits without a Work line or DEVLOG mention", out)
+
+    def test_devlog_sha_line_shown_first_for_linked_commit(self):
+        self.with_devlog("- shipped %s\n" % self.c1[:7])
+        _, out, _ = self.why(self.c1)
+        lines = out.splitlines()
+        self.assertEqual(lines[1], "  devlog: DEVLOG.md:L1 · - shipped %s" % self.c1[:7])
+        self.assertTrue(lines[2].startswith("  pipeline:demo/alpha"))
+        hit = json.loads(self.why(self.c1, "--json")[1])[0]["devlog"][0]
+        self.assertEqual((hit["line"], hit["via"]), (1, "sha"))
+
+    def test_devlog_unrelated_leaves_linked_output_unchanged(self):
+        before = self.why(self.c1)[1]
+        self.with_devlog("- 2026-11-14 something else entirely\n")
+        self.assertEqual(self.why(self.c1)[1], before)
+        self.assertEqual(json.loads(self.why(self.c1, "--json")[1])[0]["devlog"], [])
+
+    def test_devlog_eight_char_prefix_not_matched(self):
+        sha = self.commit("dl4.txt", "n\n", "Prefix change")
+        self.with_devlog("- see %s here\n" % sha[:8])
+        _, out, _ = self.why(sha)
+        self.assertNotIn("devlog", out.replace("DEVLOG mention", ""))
+
+    def test_devlog_full_sha_matches(self):
+        sha = self.commit("dl5.txt", "n\n", "Full change")
+        self.with_devlog("- see %s here\n" % sha)
+        self.assertIn("devlog: DEVLOG.md:L1", self.why(sha)[1])
+
+    def with_dated_item(self, devlog_text, day="2026-11-14"):
+        with open(os.path.join(self.tmp, "PIPELINE.md"), "a") as fh:
+            fh.write("- **Dated feature** · project: demo · id: dated · status: building · devlog: %s\n" % day)
+        self.with_devlog(devlog_text)
+        return self.commit("dated.txt", "d\n", "Dated work", "Work: dated")
+
+    def test_devlog_work_item_by_date_line(self):
+        sha = self.with_dated_item("- 2025-01-01 old\n- 2026-11-14 chose plain words\n2026-11-14 second\n- 2026-11-15 later\n")
+        _, out, _ = self.why(sha)
+        self.assertIn("  devlog (work item pipeline:demo/dated): DEVLOG.md:L2 · - 2026-11-14 chose plain words", out)
+        self.assertIn("DEVLOG.md:L3 · 2026-11-14 second", out)
+        self.assertNotIn("old", out)
+        self.assertNotIn("later", out)
+        self.assertLess(out.index("devlog (work item"), out.index("pipeline:demo/dated"))
+        hit = json.loads(self.why(sha, "--json")[1])[0]["devlog"][0]
+        self.assertEqual(hit["via"], "work item pipeline:demo/dated")
+
+    def test_devlog_work_item_impossible_date_never_matches(self):
+        sha = self.with_dated_item("- 2026-02-31 not a day\n## 31 February 2026\nnor this\n", day="2026-02-31")
+        _, out, _ = self.why(sha)
+        self.assertNotIn("not a day", out)
+        self.assertNotIn("nor this", out)
+        self.assertEqual(json.loads(self.why(sha, "--json")[1])[0]["devlog"], [])
+
+    def test_devlog_work_item_by_day_heading(self):
+        sha = self.with_dated_item("## 13 November 2026\nnot this\n## 14 November 2026\nkept the plain way\n- and this\n## 15 November 2026\nnor this\n")
+        _, out, _ = self.why(sha)
+        self.assertIn("DEVLOG.md:L4 · kept the plain way", out)
+        self.assertIn("DEVLOG.md:L5 · - and this", out)
+        self.assertNotIn("not this", out)
+        self.assertNotIn("nor this", out)
+
+    def test_devlog_work_item_limit_three(self):
+        sha = self.with_dated_item("".join("- 2026-11-14 n%d\n" % i for i in range(6)))
+        data = json.loads(self.why(sha, "--json")[1])[0]["devlog"]
+        self.assertEqual(len(data), 3)
+
+    def test_devlog_no_duplicate_between_paths(self):
+        sha = self.with_dated_item("")
+        self.with_devlog("- 2026-11-14 built in %s\n- 2026-11-14 other\n" % sha[:7])
+        _, out, _ = self.why(sha)
+        self.assertEqual(out.count("DEVLOG.md:L1 "), 1)
+        self.assertIn("  devlog: DEVLOG.md:L1", out)
+        self.assertIn("devlog (work item pipeline:demo/dated): DEVLOG.md:L2", out)
+
+    def test_devlog_work_item_needs_same_folder(self):
+        sha = self.with_dated_item("")
+        sub = os.path.join(self.tmp, "sub")
+        os.mkdir(sub)
+        with open(os.path.join(sub, "DEVLOG.md"), "w") as fh:
+            fh.write("- 2026-11-14 elsewhere\n")
+        with open(self.cfg) as fh:
+            cfg = json.load(fh)
+        cfg["ships"] = [os.path.join(sub, "DEVLOG.md")]
+        with open(self.cfg, "w") as fh:
+            json.dump(cfg, fh)
+        self.assertNotIn("elsewhere", self.why(sha)[1])
+
+    def test_devlog_without_ships_files_unchanged(self):
+        sha = self.commit("dl3.txt", "n\n", "No ships")
+        _, out, _ = self.why(sha)
+        self.assertEqual(out.splitlines()[-1], "1 commits without a Work line or DEVLOG mention")
 
     def test_commit_target(self):
         code, out, _ = self.why(self.c1)
@@ -218,7 +353,7 @@ class WhyTests(unittest.TestCase):
 
     def test_no_trailer_count(self):
         _, out, _ = self.why(os.path.join(self.repo, "other.txt"))
-        self.assertEqual(out.splitlines()[-1], "1 commits without a Work line")
+        self.assertEqual(out.splitlines()[-1], "1 commits without a Work line or DEVLOG mention")
         self.assertNotIn("Plain change", out)
 
     def test_missing_decision_and_no_spec(self):
@@ -238,14 +373,14 @@ class WhyTests(unittest.TestCase):
         code, out, _ = self.why(self.c10)
         self.assertEqual(code, 0)
         self.assertNotIn("publish-yes", out)
-        self.assertIn("1 commits without a Work line", out)
+        self.assertIn("1 commits without a Work line or DEVLOG mention", out)
         self.assertNotIn("Approval only", out)
 
     def test_json_shape(self):
         code, out, _ = self.why(self.notes(), "--json")
         data = json.loads(out)
         self.assertEqual(len(data), 2)
-        self.assertEqual(set(data[0]), {"commit", "date", "subject", "work", "decisions", "session"})
+        self.assertEqual(set(data[0]), {"commit", "date", "subject", "work", "decisions", "session", "devlog"})
         self.assertEqual(data[0]["commit"], self.c2)
         self.assertEqual(set(data[0]["work"][0]), {"id", "found", "title", "status", "why", "spec", "decisions"})
         self.assertEqual(data[0]["work"][0]["decisions"],

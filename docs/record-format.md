@@ -26,7 +26,7 @@ Ship line:
 <YYYY-MM-DD> · session: <id> · project: <repo> · shipped <version> <sha> · decisions: <slugs> · tasks closed: <ids>
 ```
 
-Commit links (read by `why`): Put the links in a LOCAL git note by default: `git notes --ref=work-map add -m "Work: <id>" -m "Session: <id>" <sha>`. Notes stay on this computer; a normal `git push` does not send them; never push `refs/notes/work-map`. `why` reads the note lines `Work:`, `Session:` and `Decision:` (comma separated values, keys in any case) together with any trailers and merges them without duplicates; a trailer `Session` wins over the note's. Put the links in the commit message as trailers ONLY in a repository you know is private. Never in a public repository's commit messages: work names and session ids are private, and a pushed commit message is permanent.
+Commit links (read by `why`): Put the links in a LOCAL git note by default: `git notes --ref=work-map add -m "Work: <id>" -m "Session: <id>" <sha>`. Notes stay on this computer; a normal `git push` does not send them; never push `refs/notes/work-map`. `why` reads the note lines `Work:`, `Session:` and `Decision:` (comma separated values, keys in any case) together with any trailers and merges them without duplicates; a trailer `Session` wins over the note's. Put the links in the commit message as trailers ONLY in a repository you know is private. Never in a public repository's commit messages: work names and session ids are private, and a pushed commit message is permanent. To keep notes through amend and rebase, run `git config notes.rewriteRef refs/notes/work-map` in each repository that uses notes.
 
 Trailer form, for a private repository only: end a commit message with one final trailer paragraph, all trailers together (git reads trailers only from the last paragraph). `Work` is the main trailer, `Decision` is optional, `Session` is optional. Approvals (`publish-yes...`) are never shown.
 
@@ -43,6 +43,14 @@ A decision that a later one replaces carries the field `SUPERSEDED by <new-slug>
 
 A log file (a ships file such as `DEVLOG.md`) can opt in to newest first by holding one anchor line, exactly `<!-- work-map: newest first -->` (surrounding spaces ignored). `ships.py add` then puts each new line directly below the anchor; a file with no anchor is appended to, and a file with two or more anchors is refused. A log `ships.py` creates starts `# <project> DEVLOG`, a blank line, the anchor, then the line. Decision files keep their append order and take no anchor.
 
+Two more DEVLOG line shapes, written only by `ships.py checkpoint` and `ships.py deviation` (a checkpoint is something that happened, is true now and stays true, with proof; a deviation is an approved departure from the procedure):
+
+`- <date> · session: <id> · project: <P> · <text> · proof: <proof>`, where `<proof>` is `commit <sha7>[, commit <sha7>]`, or `ship <VERSION>`, or `<NAME> (<HH:MM> "<words>")`.
+
+`- <date> · session: <id> · project: <P> · deviation: <step> · <NAME> (<HH:MM> "<words>") → <what> · Why: <why>`.
+
+`work_map.py why` finds a checkpoint by the 7-character sha it names.
+
 A decision may carry `kind: standing|one-time`: `standing` is a rule future work follows, `one-time` is a choice about one finished piece of work (or a record of something that happened). `from: unknown` gives no link.
 
 In list fields (`applies`, `decisions`, `tasks closed`), `none` means there are none and `unknown` means nobody recorded them; both give no link, and the source line keeps which was written.
@@ -50,8 +58,15 @@ In list fields (`applies`, `decisions`, `tasks closed`), `none` means there are 
 Pipeline files come in two formats. A **map line** (key `map` in the config; one per project) becomes a `project:<id>` record:
 
 ```
-- **<name>** · id: <project-id> · status: live|building|later|closed · aka: <old names|none> · why: <reason>
+- **<name>** · id: <project-id> · access: public|going-public|house|none · status: workbench|waiting|idea|settled|dropped · aka: <old names|none> · pipeline: <path> · why: <reason>
+- **<name>** · id: <idea-id> · access: <access> · status: idea · aka: <old names|none> · spec: <path|none> · why: <reason>
 ```
+
+A root line carries two tags. `access:` is `public` (others have it), `going-public` (private now, meant for the public), `house` (ours only) or `none` (not built). `status:` is `workbench` (being worked on now, at most `workbench_limit`), `waiting` (known work, not on the bench), `idea` (not started), `settled` (finished, nothing open) or `dropped`. Older root lines (status `live`, `building`, `later`, `closed`, `planned`, `parked`, or no `access:` tag) still read, and are kept as written.
+
+The pointer tag lets the graph connect the line: a project points to its own PIPELINE file with `pipeline: <path>`, an idea to its spec or plan page with `spec: <path>` (use one or the other on a line, never both). A path is read from the config's folder; `none` says there is nothing to point to. A `workbench`, `waiting` or `settled` line needs `pipeline:`; an `idea` line needs `spec:` or `pipeline:`; `dropped` needs none. `inventory` reports `pointer-missing`, `pointer-target-missing` (a path that does not exist), `access-missing` (a new-status line with no `access:`) and `access-invalid` (a value outside the four) under `problems`; none stops the read. Old-status lines are not held to the pointer or access rules.
+
+At most N root lines may be `workbench` at once: the config key `workbench_limit` (a whole number, default 3). `inventory` reports `workbench-over-limit` when a hand edit goes past it; `pipeline.py root` refuses to. Write root lines only with `pipeline.py root add|update`.
 
 An `aka` name resolves to the project id, so a decision that applies to an old name links to the project. Two projects claiming one old name are listed under `problems` in `inventory`. A **project item line** sits in that project's own PIPELINE file (the project is the folder name unless a `project:` tag says otherwise):
 

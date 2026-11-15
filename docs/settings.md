@@ -14,6 +14,14 @@ A small JSON (or TOML, Python 3.11+) file listing source files by kind. Globs ar
 
 Decision files are always searched on every line; this only widens notes. `--decision-words` on the command adds more.
 
+## Workbench limit
+
+`workbench_limit` is an optional whole number (default 3): the most root lines that may have status `workbench` at once. `pipeline.py root` refuses to go past it, `inventory` reports `workbench-over-limit` when a hand edit does. A value that is not a whole number of 1 or more stops the reader with exit 2.
+
+```json
+{"map": ["PIPELINE.md"], "workbench_limit": 3}
+```
+
 ## Writer safety limits
 
 - The writers lock a file by the system's advisory lock where there is one (macOS and Linux); on other systems two writers at once are not protected.

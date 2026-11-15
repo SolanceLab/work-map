@@ -6,6 +6,7 @@ Python 3.9+, standard library only. Reads files and git history only; writes not
 Run:  python3 work_map.py --config <file> <index|query|open|slice|inventory|why> [--json]
 """
 import argparse
+import datetime
 import glob
 import json
 import os
@@ -14,11 +15,15 @@ import subprocess
 import sys
 
 WAITING = re.compile(r"waiting(-on-[a-z0-9][a-z0-9-]*)?")
+DEFAULT_WORKBENCH_LIMIT = 3
 PLURAL = {"decision": "decisions", "pipeline": "pipeline", "task": "tasks", "ship": "ships", "project": "projects"}
 SEP = " · "
+ROOT_ACCESS = ("public", "going-public", "house", "none")
+NEW_PROJECT_STATUSES = ("workbench", "waiting", "settled")  # these are projects: they need their own PIPELINE
 DATE = r"\d{4}-\d{2}-\d{2}"
-OPEN_STATUSES = {"idea", "planned", "building", "open", "standing", "waiting", "live"}
+OPEN_STATUSES = {"idea", "planned", "building", "open", "standing", "waiting", "live", "workbench"}
 KINDS = ("decisions", "pipeline", "tasks", "ships")
+ROOT_STATUSES = ("workbench", "waiting", "idea", "settled", "dropped")  # old root statuses (live, building, later, closed ...) still read as written
 
 
 def is_waiting(status):
@@ -161,16 +166,59 @@ def parse_map_file(text, source_name):
         tags = {}
         for f in split_fields(rest):
             t = tag(f)
-            if t and t[0] in ("id", "status", "aka", "why"):
+            if t and t[0] in ("id", "status", "access", "aka", "why", "pipeline", "spec"):
                 tags[t[0]] = t[1]
         pid = tags.get("id") or slugify(name)
         why = tags.get("why", "")
         r = record("project", "project:" + pid, (source_name, n), project=pid,
                    status=tags.get("status") or "unknown", gist=why or name)
         r["title"], r["why"], r["aka"], r["details"] = name, why, csv(tags.get("aka", "")), details
+        for k in ("pipeline", "spec", "access"):
+            if k in tags:
+                r[k] = tags[k]  # a path, or "none" (access: one of ROOT_ACCESS)
         r["text"] = " ".join([name, why] + r["aka"] + details)
         out.append(r)
     return out
+
+
+def root_problems(roots, base, limit):
+    """Problems in root (map) lines. roots: dicts with id, status, pipeline, spec (the last two may be missing)."""
+    out = []
+    bench = [r["id"] for r in roots if r["status"] == "workbench"]
+    if len(bench) > limit:
+        out.append({"type": "workbench-over-limit", "limit": limit, "ids": bench})
+    for r in roots:
+        st, pl, sp = r["status"], r.get("pipeline"), r.get("spec")
+        if (st in NEW_PROJECT_STATUSES and (not pl or pl == "none")) or (st == "idea" and not pl and not sp):
+            out.append({"type": "pointer-missing", "id": r["id"], "status": st})
+        if st in ROOT_STATUSES:  # a line with an old status is not asked for access
+            ac = r.get("access")
+            if ac is None:
+                out.append({"type": "access-missing", "id": r["id"], "status": st})
+            elif ac not in ROOT_ACCESS:
+                out.append({"type": "access-invalid", "id": r["id"], "status": st, "access": ac})
+        for field, path in (("pipeline", pl), ("spec", sp)):
+            if path and path != "none" and not os.path.exists(path if os.path.isabs(path) else os.path.join(base, path)):
+                out.append({"type": "pointer-target-missing", "id": r["id"], "field": field, "path": path})
+    return out
+
+
+def config_workbench_limit(path):
+    """The config's workbench_limit (int, default 3); a value that is not a whole number above 0 is a ConfigError."""
+    try:
+        with open(path, "rb") as fh:
+            raw = fh.read().decode("utf-8")
+        if path.endswith(".toml"):
+            import tomllib  # Python 3.11+
+            cfg = tomllib.loads(raw)
+        else:
+            cfg = json.loads(raw)
+    except Exception:
+        return DEFAULT_WORKBENCH_LIMIT  # load_config already reports an unreadable config
+    v = cfg.get("workbench_limit", DEFAULT_WORKBENCH_LIMIT) if isinstance(cfg, dict) else DEFAULT_WORKBENCH_LIMIT
+    if isinstance(v, bool) or not isinstance(v, int) or v < 1:
+        raise ConfigError("config key 'workbench_limit' must be a whole number of 1 or more")
+    return v
 
 
 def parse_ship(line, source):
@@ -401,7 +449,7 @@ def public(r, full=False):
         links.setdefault(type_, []).append(target)
     d["links"] = links if full else {t: v[:5] for t, v in links.items()}
     if full:
-        d.update({k: r[k] for k in ("title", "why", "spec", "decisions", "devlog", "aka", "details") if r.get(k)})
+        d.update({k: r[k] for k in ("title", "why", "access", "pipeline", "spec", "decisions", "devlog", "aka", "details") if r.get(k)})
     return d
 
 
@@ -478,7 +526,7 @@ def cmd_open(args, g):
                   "  project: %s · session: %s · status: %s · date: %s" % (
                       r["project"], r["session"], r["status"], r["date"] or "-"),
                   "  text: %s" % r["gist"]]
-        for k in ("who", "call", "why", "spec", "devlog"):
+        for k in ("who", "call", "why", "access", "pipeline", "spec", "devlog"):
             if r.get(k) and not (k == "spec" and r[k] == "none"):
                 lines.append("  %s: %s" % (k, r[k]))
         if r.get("aka"):
@@ -572,9 +620,23 @@ def cmd_slice(args, g):
     return 0
 
 
+def problem_line(p):
+    if p["type"] == "alias-collision":
+        return "%s: %s (kept %s, also claimed by %s)" % (p["type"], p["alias"], p["kept"], p["also-claimed-by"])
+    if p["type"] == "workbench-over-limit":
+        return "%s: %d on the workbench, limit %d (%s)" % (p["type"], len(p["ids"]), p["limit"], ", ".join(p["ids"]))
+    if p["type"] == "pointer-target-missing":
+        return "%s: %s %s: %s" % (p["type"], p["id"], p["field"], p["path"])
+    if p["type"] == "access-invalid":
+        return "%s: %s access %s (status %s)" % (p["type"], p["id"], p["access"], p["status"])
+    return "%s: %s (status %s)" % (p["type"], p["id"], p["status"])
+
+
 def cmd_inventory(args, g):
     records, files, excluded, graph = g
-    collisions, unresolved_by_file, problems = graph[3], graph[4], graph[5]
+    collisions, unresolved_by_file, problems = graph[3], graph[4], list(graph[5])
+    roots = [dict(r, id=r["project"]) for r in records if r["kind"] == "project"]
+    problems += root_problems(roots, args.base, args.workbench_limit)
     per_file = [dict(f, unresolved=unresolved_by_file.get(f["file"], 0)) for f in files]
     payload = {"counts": counts(records), "files": per_file, "collisions": collisions,
                "unresolved": sum(unresolved_by_file.values()), "problems": problems, "excluded": excluded}
@@ -585,9 +647,7 @@ def cmd_inventory(args, g):
     lines.append("unresolved links: %d" % payload["unresolved"])
     lines.append("collisions: %d" % len(collisions) + "".join(
         "\n  %s (%d records)" % (i, n) for i, n in sorted(collisions.items())))
-    lines.append("problems: %d" % len(problems) + "".join(
-        "\n  %s: %s (kept %s, also claimed by %s)" % (p["type"], p["alias"], p["kept"], p["also-claimed-by"])
-        for p in problems))
+    lines.append("problems: %d" % len(problems) + "".join("\n  " + problem_line(p) for p in problems))
     lines.append("excluded: %d" % len(excluded) + "".join(
         "\n  %s (%s): %s" % (e["file"], e["kind"], e["reason"]) for e in excluded))
     emit(args, payload, lines)
@@ -732,7 +792,7 @@ def decision_view(records, slug):
 
 def work_chain(records, work_id):
     chain = {"id": work_id, "found": False, "title": "", "status": "", "why": "", "spec": "",
-             "decisions": [], "record": None, "session": "", "ambiguous": []}
+             "decisions": [], "record": None, "session": "", "ambiguous": [], "source": "", "devlog": ""}
     hits = find_items(records, work_id)
     if len(hits) > 1:
         chain["ambiguous"] = [h["id"] for h in hits]
@@ -741,8 +801,69 @@ def work_chain(records, work_id):
         chain.update(found=True, title=r.get("title", ""), status=r.get("status", ""), why=r.get("why", ""),
                      spec="" if r.get("spec", "none") in ("none", "") else r["spec"], record=r["id"],
                      session="" if r.get("session", "unknown") == "unknown" else r["session"])
+        chain["source"], chain["devlog"] = r["source"][0], r.get("devlog", "")
         chain["decisions"] = [decision_view(records, d) for d in r.get("decisions", []) if not is_approval(d)]
     return chain
+
+
+def devlog_mentions(files, base, sha, limit=3):
+    """Lines of the DEVLOG files that name this commit by exactly its 7-char or its full sha."""
+    pat = re.compile(r"(?<![0-9a-fA-F])(?:%s|%s)(?![0-9a-fA-F])" % (re.escape(sha), re.escape(sha[:7])), re.I)
+    hits = []
+    for f in files:
+        if f["kind"] != "ships":
+            continue
+        try:
+            with open(os.path.join(base, f["file"]), encoding="utf-8", errors="replace") as fh:
+                for n, line in enumerate(fh, 1):
+                    if pat.search(line):
+                        hits.append(dict(source=f["file"], line=n, text=line.strip()[:300]))
+                        if len(hits) >= limit:
+                            return hits
+        except OSError:
+            continue
+    return hits
+
+
+_MONTHS = ("january", "february", "march", "april", "may", "june", "july", "august", "september", "october",
+           "november", "december")
+
+
+def devlog_day_lines(files, base, source, day, limit=3):
+    """Lines dated `day` (YYYY-MM-DD) in the DEVLOG.md that sits in the same folder as the PIPELINE file `source`."""
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})$", day or "")
+    if not m or not source:
+        return []
+    y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    try:
+        datetime.date.fromisoformat(day)
+    except ValueError:
+        return []
+    folder = os.path.dirname(os.path.abspath(os.path.join(base, source)))
+    head = re.compile(r"^##\s+0?%d\s+(%s|%s)\s+%d\s*$" % (d, _MONTHS[mo - 1], _MONTHS[mo - 1][:3], y), re.I)
+    dated = re.compile(r"^(?:-\s+)?%s(?!\d)" % re.escape(day))
+    hits = []
+    for f in files:
+        if f["kind"] != "ships" or os.path.basename(f["file"]) != "DEVLOG.md":
+            continue
+        path = os.path.abspath(os.path.join(base, f["file"]))
+        if os.path.dirname(path) != folder:
+            continue
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                under = False
+                for n, line in enumerate(fh, 1):
+                    t = line.strip()
+                    if t.startswith("## "):
+                        under = bool(head.match(t))
+                        continue
+                    if t and (dated.match(t) or under):
+                        hits.append(dict(source=f["file"], line=n, text=t[:300]))
+                        if len(hits) >= limit:
+                            return hits
+        except OSError:
+            continue
+    return hits
 
 
 def cmd_why(args, g):
@@ -758,13 +879,26 @@ def cmd_why(args, g):
     if not commits:
         emit(args, [], [note or "no commits found for " + args.target])
         return 1
+    base = getattr(args, "base", ".")
     payload, lines, shown, bare = [], [], set(), 0
     for c in commits:
         direct = [d for d in c["decision"] if not is_approval(d)]
-        if not c["work"] and not direct:
+        # the DEVLOG is the owner's record of why it was done this way: read it for every commit, show it first
+        devlog = devlog_mentions(g[1], base, c["sha"])
+        if not c["work"] and not direct and not devlog:
             bare += 1
             continue
         chains = [work_chain(records, w) for w in c["work"]]
+        for h in devlog:
+            h["via"] = "sha"
+        seen_hits = {(h["source"], h["line"]) for h in devlog}
+        for ch in chains:
+            if ch["found"] and ch["devlog"]:
+                for h in devlog_day_lines(g[1], base, ch["source"], ch["devlog"]):
+                    if (h["source"], h["line"]) not in seen_hits:
+                        seen_hits.add((h["source"], h["line"]))
+                        h["via"] = "work item " + ch["record"]
+                        devlog.append(h)
         decs = [decision_view(records, d) for d in direct]
         session = c["session"] or next((ch["session"] for ch in chains if ch["session"]), "")
         works = []
@@ -776,8 +910,11 @@ def cmd_why(args, g):
             works.append(w)
         payload.append(dict(commit=c["sha"], date=c["date"], subject=c["subject"], work=works,
                             decisions=[dict(id=d["id"], found=d["found"], call=d["call"], why=d["why"]) for d in decs],
-                            session=session or None))
+                            session=session or None, devlog=devlog))
         lines.append("commit %s · %s · %s" % (c["sha"][:7], c["date"], c["subject"]))
+        for h in devlog:
+            tag = "devlog" if h["via"] == "sha" else "devlog (%s)" % h["via"]
+            lines.append("  %s: %s:L%d · %s" % (tag, h["source"], h["line"], h["text"]))
         for d in decs:
             lines += decision_lines(d, "  ")
         for ch in chains:
@@ -799,7 +936,7 @@ def cmd_why(args, g):
         if session:
             lines.append("  session: " + session)
     if bare:
-        lines.append("%d commits without a Work line" % bare)
+        lines.append("%d commits without a Work line or DEVLOG mention" % bare)
     emit(args, payload, lines)
     return 0
 
@@ -840,9 +977,11 @@ def main(argv=None):
     args = ap.parse_args(argv)
     try:
         sources, base = load_config(args.config)
+        args.base, args.workbench_limit = base, config_workbench_limit(args.config)
     except ConfigError as e:
         print("work_map: %s" % e, file=sys.stderr)
         return 2
+    args.base = base
     records, files, excluded = load_all(sources, base)
     g = (records, files, excluded, build_graph(records))
     return {"index": cmd_index, "query": cmd_query, "open": cmd_open,

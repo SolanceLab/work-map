@@ -40,10 +40,28 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/pipeline.py check reports/PIPELINE.md
 
 Statuses: idea, planned, building, waiting (or `waiting-on-<name>`), parked, done, dropped. `done` needs `--devlog <date>`; `dropped` needs `--add-detail` saying why. `--decisions` slugs must already exist in the decision files.
 
+Root lines (the map file: one line per project or idea) are written only through `pipeline.py root`, never by hand, so the status, pointer and workbench rules hold:
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/pipeline.py root add --name "Reports" --id reports --access house --status workbench --why "clients wait on it" --pipeline reports/PIPELINE.md
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/pipeline.py root add --name "Mobile app" --id mobile --access none --status idea --why "a thought" --spec specs/mobile.md
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/pipeline.py root update --id reports --status settled
+```
+
+Two tags on every line. `access:` is `public` (others have it), `going-public` (private now, meant for the public), `house` (ours only) or `none` (not built). `status:` is `workbench` (being worked on now, at most `workbench_limit`), `waiting` (known work, not on the bench), `idea` (not started), `settled` (finished, nothing open) or `dropped`. Pointer rule: a project line (`workbench`, `waiting`, `settled`) points at its own PIPELINE with `--pipeline`; an idea points at its spec or plan page with `--spec` (`none` when there is none, written out); never both, and the path must exist. At most `workbench_limit` lines (default 3) may be on the workbench: when the writer refuses, name the ones already there and ask which moves off.
+
 Write a ship line (goes under the anchor line `<!-- work-map: newest first -->` when the project's ships file, or `--file`, has one, else appends; a file with two anchors is refused; `--dry-run` shows the line without writing):
 
 ```
 python3 ${CLAUDE_PLUGIN_ROOT}/scripts/ships.py add --project reports --version v0.4.0 --sha 9f3c2ab --decisions keep-csv-export --tasks t-14,t-15
+```
+
+Write DEVLOG checkpoints and approved deviations only through `ships.py`, never by hand. The DEVLOG holds only things that happened, are true now and stay true, WITH proof, plus approved deviations. A checkpoint needs one kind of proof: a commit sha (so `why` can find it), a ship version, or the user's own words with who and time. The file must already have its one anchor; a refused write leaves it untouched:
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/ships.py checkpoint --project reports --text "CSV export verified on the live site" --commit 9f3c2ab
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/ships.py checkpoint --project reports --text "Weekly digest approved" --who Sam --time 14:05 --words "send it"
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/ships.py deviation --project reports --step "review before deploy" --who Sam --time 14:05 --words "skip it" --what "deployed without the second review" --why "hotfix for a broken login"
 ```
 
 Tasks have no writer: write them by hand in the shape below.
@@ -102,7 +120,7 @@ Separate several slugs or ids with commas.
 
 ## 5. Commit links (local note by default)
 
-Put the links in a LOCAL git note by default: `git notes --ref=work-map add -m "Work: <id>" -m "Session: <id>" <sha>`. Notes stay on this computer; a normal `git push` does not send them; never push `refs/notes/work-map`. `why` reads the note lines `Work:`, `Session:` and `Decision:` (comma separated values, keys in any case) together with any trailers and merges them without duplicates; a trailer `Session` wins over the note's. Put the links in the commit message as trailers ONLY in a repository you know is private. Never in a public repository's commit messages: work names and session ids are private, and a pushed commit message is permanent.
+Put the links in a LOCAL git note by default: `git notes --ref=work-map add -m "Work: <id>" -m "Session: <id>" <sha>`. Notes stay on this computer; a normal `git push` does not send them; never push `refs/notes/work-map`. `why` reads the note lines `Work:`, `Session:` and `Decision:` (comma separated values, keys in any case) together with any trailers and merges them without duplicates; a trailer `Session` wins over the note's. Put the links in the commit message as trailers ONLY in a repository you know is private. Never in a public repository's commit messages: work names and session ids are private, and a pushed commit message is permanent. To keep notes through amend and rebase, run `git config notes.rewriteRef refs/notes/work-map` in each repository that uses notes.
 
 Only in a repository you know is private, you may instead put the links in the commit message: when a commit carries out a pipeline item, end the message with ONE final trailer paragraph (all trailers together, nothing after them; git reads trailers only from the last paragraph): `Work: <item id>` lines (one per item) and `Session: <your 8-character session id>`. `Work` is the main trailer; `Decision: <slug>` is optional, for a decision the commit carries out directly; `Session` is optional. Use `<project>/<id>` whenever the id might exist in another project. Never put an approval (`publish-yes...`) there; `why` never shows approvals.
 

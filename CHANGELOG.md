@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.0
+
+- `ships.py checkpoint` and `ships.py deviation` write the DEVLOG's two other line kinds under the one anchor, with proof (a commit sha, a ship version, or the user's words with who and time) and refuse a missing proof, bad sha or time, empty field, newline or " · " in a field, and a file with no anchor or two (file untouched). `why` finds a checkpoint by its commit sha. A work item's `devlog:` date that is not a real date (2026-02-31) no longer matches any DEVLOG line.
+- Root (map) lines take a pointer tag: `pipeline: <path>` (a project's own PIPELINE) or `spec: <path>` (an idea's spec or plan page); `open project:<id>` prints it.
+- A root line carries two tags. `access:` is `public` (others have it), `going-public` (private now, meant for the public), `house` (ours only) or `none` (not built). `status:` is `workbench` (being worked on now), `waiting` (known work, not on the bench), `idea` (not started), `settled` (finished, nothing open) or `dropped`. Older statuses (`live`, `building`, `later`, `closed`...) and lines with no `access:` still read as written. `workbench` and `waiting` count as open; `settled` does not. `open project:<id>` prints `access:`.
+- At most `workbench_limit` (config key, default 3) root lines may be on the workbench. Pointer rule: `workbench`, `waiting` and `settled` need `pipeline:`; `idea` needs `spec:` or `pipeline:`; `dropped` needs none. `inventory` reports `workbench-over-limit`, `pointer-missing`, `pointer-target-missing`, `access-missing` and `access-invalid` under problems.
+- `pipeline.py root add|update` writes root lines (`add` requires `--access`, `update` takes it) and refuses a wrong access or status, a full workbench, a missing pointer or a pointer to a file that does not exist; `pipeline.py check` also checks root lines. The skill tells the AI to write root lines only this way.
+- `why` reads the DEVLOG first: every commit shows, before its work item and decisions, the lines of the configured `ships` files that name its exact 7-character or full sha (`devlog: <file>:L<n> · <text>`), and up to 3 lines dated the day of a work item's `devlog: <YYYY-MM-DD>` tag, found in the DEVLOG.md beside that item's PIPELINE file (`devlog (work item <id>): ...`). A commit with only DEVLOG hits is shown and not counted as "without a Work line or DEVLOG mention"; `--json` carries a `devlog` list (each hit has `source`, `line`, `text`, `via`) on each commit.
+- Docs: `git config notes.rewriteRef refs/notes/work-map` keeps local notes through amend and rebase.
+
 ## 0.4.0
 
 - `work_map.py why <commit|file|file:LINE>` follows a commit back to the reasons it exists: the pipeline item in its `Work:` trailer, that item's why, the decisions it rests on (approvals such as `publish-yes...` are left out), its spec and session. An optional `Decision: <slug>` trailer shows that decision directly. A bare id shared by two projects is reported as ambiguous. Read-only; a git refusal exits 2, a target with no committed history exits 1.
