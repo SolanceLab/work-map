@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.2
 
 - `decisions.py query` never cuts a match silently: when more lines match than it prints in full (25 exact, 15 closest), it names every remaining one as `<file>:<line> <slug>` under `also matching (N more):`, before the `showing N of M` line. Live standing decisions that apply to `house` print first among exact matches.
 
