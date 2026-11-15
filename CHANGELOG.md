@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `decisions.py query` never cuts a match silently: when more lines match than it prints in full (25 exact, 15 closest), it names every remaining one as `<file>:<line> <slug>` under `also matching (N more):`, before the `showing N of M` line. Live standing decisions that apply to `house` print first among exact matches.
+
 ## 0.5.1
 
 - `ships.py yes`: a publish yes is a DEVLOG line. `ships.py yes --project P --tag T --who NAME --time HH:MM --words W [--repo R] [--note N]` writes `- <date> · session: <id> · project: <P> · publish-yes <R> <T> · yes: <NAME> (<HH:MM> "<W>")[ · <N>]` under the anchor (`--repo` defaults to the project), refuses a second yes for the same repo and tag, and the reader never reads a yes line as a ship nor shows it in why.

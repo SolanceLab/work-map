@@ -153,7 +153,7 @@ class QueryOrder(Base):
     def test_cut_exact_list_prints_count_line(self):
         self.write(*[line("2026-10-%02d" % d, "slug-%d" % d) for d in range(1, 29)])
         out = self.query("because", "--file", str(self.file))
-        self.assertEqual(len(out), 26)
+        self.assertEqual(len(out), 28)
         self.assertEqual(out[-1], "showing 25 of 28; add a term to narrow")
         self.assertIn("2026-10-28", out[0])
 
@@ -165,7 +165,7 @@ class QueryOrder(Base):
         self.write(*[line("2026-10-%02d" % d, "slug-%d" % d) for d in range(1, 21)])
         out = self.query("because", "nomatchword", "--file", str(self.file))
         self.assertEqual(out[0], "No line matches every term; closest matches:")
-        self.assertEqual(len(out), 1 + 15 + 1)
+        self.assertEqual(len(out), 1 + 15 + 2 + 1)
         self.assertEqual(out[-1], "showing 15 of 20; add a term to narrow")
         self.assertIn("2026-10-20", out[1])
 

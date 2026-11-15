@@ -7,8 +7,9 @@
         [--supersedes OLD-SLUG]   marks the old line "SUPERSEDED by <slug>" (same file, one atomic write)
   query TERMS... [--config C] [--file P]... [--notes P]... [--decision-words REGEX]...
         Lines matching ALL terms (case-insensitive); when none match and there are 2+ terms, the closest
-        lines matching at least half, tagged [k/n terms]. Newest date first; a replaced decision keeps its place
-        with a [superseded by <slug>] prefix; a cut list says "showing N of M; add a term to narrow".
+        lines matching at least half, tagged [k/n terms]. Live house-wide standing rules first, then newest date first;
+        a replaced decision keeps its place with a [superseded by <slug>] prefix. A cut list names every left-out
+        match under "also matching (N more):" and ends "showing N of M; add a term to narrow".
         Exit 0 always: no match means "not decided on record".
 
 Paths: decision files come from --file, else the config's "decisions" list (--config, else $WORK_MAP_CONFIG,
@@ -173,6 +174,22 @@ def label(path):
     return os.path.basename(path)
 
 
+def print_rest(rest):
+    """Every match the cap left out, compactly: no silent cut."""
+    print("also matching (%d more):" % len(rest))
+    items = ["%s:%d %s" % (label(e["path"]), e["line"], e["slug"]) for e in rest]
+    row = ""
+    for n, item in enumerate(items):
+        piece = item + ("," if n < len(items) - 1 else "")
+        if row and len(row) + 1 + len(piece) > 120:
+            print(row)
+            row = "  " + piece
+        else:
+            row = (row + " " + piece) if row else "  " + piece
+    if row:
+        print(row)
+
+
 def query_command(argv):
     parser = argparse.ArgumentParser(prog="decisions.py query")
     parser.add_argument("terms", nargs="+")
@@ -208,7 +225,13 @@ def query_command(argv):
         date = LINE_DATE.match(full)
         rec = work_map.parse_decision(full, (path, i))
         mark = "[superseded by %s] " % rec["superseded_by"] if rec and rec.get("superseded_by") else ""
-        return {"path": path, "line": i, "date": date.group(1) if date else "", "text": mark + full.strip()[:300]}
+        applies = rec.get("applies", []) if rec else []
+        pin = bool(rec) and not rec.get("superseded_by") \
+            and (rec.get("weight", "").lower() == "standing" or " · kind: standing · " in full) \
+            and any(a.strip().lower() == "house" for a in applies)
+        slug = rec.get("slug") if rec and rec.get("slug") else full.strip()[:40]
+        return {"path": path, "line": i, "date": date.group(1) if date else "", "text": mark + full.strip()[:300],
+                "pin": pin, "slug": slug}
 
     found = []
     for path, only in sources:
@@ -219,9 +242,11 @@ def query_command(argv):
         dated = sorted([e for e in found if e["date"]], key=lambda e: e["date"], reverse=True)  # stable: same-date ties keep that order
         undated = sorted([e for e in found if not e["date"]], key=lambda e: (order[e["path"]], e["line"]))  # notes lines: current order
         found = dated + undated
+        found = [e for e in found if e["pin"]] + [e for e in found if not e["pin"]]  # live house-wide standing rules first, then today's order
         for e in found[:25]:
             print("%s:%d  %s" % (label(e["path"]), e["line"], e["text"]))
         if len(found) > 25:
+            print_rest(found[25:])
             print("showing 25 of %d; add a term to narrow" % len(found))
         return 0
     uniq = list(dict.fromkeys(terms))
@@ -241,6 +266,7 @@ def query_command(argv):
             for e in part[:15]:
                 print("[%d/%d terms] %s:%d  %s" % (e["k"], len(uniq), label(e["path"]), e["line"], e["text"]))
             if len(part) > 15:
+                print_rest(part[15:])
                 print("showing 15 of %d; add a term to narrow" % len(part))
             return 0
     print("No decision on record for: %s" % " ".join(terms))

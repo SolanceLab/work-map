@@ -32,7 +32,7 @@ python3 plugin/scripts/ships.py add --project P --version V --sha SHA [--decisio
 
 `--supersedes OLD-SLUG` marks the old decision `SUPERSEDED by <slug>` in the same file as the new line, in one atomic write. It refuses (exit 2, nothing written) when the old slug is missing, appears more than once, is already superseded, lives only in another of the config's decision files, or equals `--slug`; `--dry-run` prints both lines.
 
-`decisions.py query` lists exact matches newest date first (later line first within a file, config order across files at the same date, undated `--notes` lines last). A superseded decision keeps its place with a `[superseded by <slug>]` prefix. At most 25 exact matches, or 15 closest matches, print; when the list is cut, the last line reads `showing N of M; add a term to narrow`.
+`decisions.py query` lists exact matches newest date first (later line first within a file, config order across files at the same date, undated `--notes` lines last). A superseded decision keeps its place with a `[superseded by <slug>]` prefix. Live standing decisions that apply to `house` (`kind: standing`, `applies: [house]`, not superseded) print before all other exact matches. At most 25 exact matches, or 15 closest matches, print in full; when the list is cut, every remaining match is still named as `<file>:<line> <slug>` under `also matching (N more):`, and the last line reads `showing N of M; add a term to narrow`.
 
 `--decision-words` (repeatable) adds a Python regex for the lines of `--notes` files that mark a decision, on top of the built-in words; the config key `decision_words` does the same, and a regex that does not compile is refused with exit 2.
 

@@ -27,7 +27,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/decisions.py add --slug keep-csv-export --
 python3 ${CLAUDE_PLUGIN_ROOT}/scripts/decisions.py query keep csv
 ```
 
-`query` checks what is already decided before you ask the user again. It lists the newest first, marks a replaced decision `[superseded by <slug>]`, and says `showing N of M; add a term to narrow` when it cuts the list. When a new decision replaces an old one, add it with `--supersedes <old-slug>` instead of editing the old line by hand.
+`query` checks what is already decided before you ask the user again. It lists live house-wide standing rules first, then the newest first, marks a replaced decision `[superseded by <slug>]`, and when it cuts the list it still names every left-out match under `also matching (N more):` before `showing N of M; add a term to narrow`. When a new decision replaces an old one, add it with `--supersedes <old-slug>` instead of editing the old line by hand.
 
 Add or change a pipeline item in a project's `PIPELINE.md` (the project is the folder name; the config's `map` aka list resolves old names). `add` stamps `touched:`; `update` moves the item to the right section (`Now` for building and any waiting status, `Next` for planned, `Later` for idea and parked, `Done` for done and dropped):
 
