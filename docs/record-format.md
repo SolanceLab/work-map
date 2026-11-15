@@ -43,11 +43,13 @@ A decision that a later one replaces carries the field `SUPERSEDED by <new-slug>
 
 A log file (a ships file such as `DEVLOG.md`) can opt in to newest first by holding one anchor line, exactly `<!-- work-map: newest first -->` (surrounding spaces ignored). `ships.py add` then puts each new line directly below the anchor; a file with no anchor is appended to, and a file with two or more anchors is refused. A log `ships.py` creates starts `# <project> DEVLOG`, a blank line, the anchor, then the line. Decision files keep their append order and take no anchor.
 
-Two more DEVLOG line shapes, written only by `ships.py checkpoint` and `ships.py deviation` (a checkpoint is something that happened, is true now and stays true, with proof; a deviation is an approved departure from the procedure):
+Three more DEVLOG line shapes, written only by `ships.py checkpoint`, `ships.py deviation` and `ships.py yes` (a checkpoint is something that happened, is true now and stays true, with proof; a deviation is an approved departure from the procedure):
 
 `- <date> · session: <id> · project: <P> · <text> · proof: <proof>`, where `<proof>` is `commit <sha7>[, commit <sha7>]`, or `ship <VERSION>`, or `<NAME> (<HH:MM> "<words>")`.
 
 `- <date> · session: <id> · project: <P> · deviation: <step> · <NAME> (<HH:MM> "<words>") → <what> · Why: <why>`.
+
+`- <date> · session: <id> · project: <P> · publish-yes <repo> <tag> · yes: <NAME> (<HH:MM> "<words>")[ · <note>]` — a publish yes, one per repo and tag; the reader never treats it as a ship line and why never shows it.
 
 `work_map.py why` finds a checkpoint by the 7-character sha it names.
 

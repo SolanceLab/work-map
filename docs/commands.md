@@ -38,11 +38,12 @@ python3 plugin/scripts/ships.py add --project P --version V --sha SHA [--decisio
 
 `ships.py add` writes one ship line to the config's `ships` file (the one in a folder named like the project, else the only one; `./DEVLOG.md` with no config), and refuses a second line for the same project and version. The line goes directly under the anchor `<!-- work-map: newest first -->` when the file has exactly one; with no anchor it is appended; with two or more the command is refused (exit 2) and the file is left alone. A file the command creates starts with the heading, a blank line and the anchor. A plugin hook (`plugin/hooks/ship_reminder.py`) reminds the AI to run it after `gh release create`, `git tag vX.Y.Z` or a tag push; it never blocks, and `WORK_MAP_SHIP_REMINDER=0` turns it off.
 
-`ships.py checkpoint` and `ships.py deviation` write the two other DEVLOG line kinds (the DEVLOG holds only checkpoints, each with proof, and approved deviations):
+`ships.py checkpoint`, `ships.py deviation` and `ships.py yes` write the other DEVLOG line kinds (checkpoints with proof, approved deviations, publish yeses):
 
 ```
 python3 plugin/scripts/ships.py checkpoint --project P --text T (--commit SHA [--commit SHA2 ...] | --ship VERSION | --who NAME --time HH:MM --words W) [--date YYYY-MM-DD] [--session ID8] [--file F] [--config C] [--dry-run]
 python3 plugin/scripts/ships.py deviation --project P --step S --who NAME --time HH:MM --words W --what D --why Y [--date YYYY-MM-DD] [--session ID8] [--file F] [--config C] [--dry-run]
+python3 plugin/scripts/ships.py yes --project P --tag T --who NAME --time HH:MM --words W [--repo R] [--note N] [--date YYYY-MM-DD] [--session ID8] [--file F] [--config C] [--dry-run]
 ```
 
 They pick the target file like `add`, but the file must already hold exactly one anchor: no anchor, two or more anchors, or a missing file is refused (exit 2, one line, nothing written). Only `--file` naming a path that does not exist yet creates a file (heading, blank line, anchor, line). The line goes directly under the anchor, is read back, and the file is restored byte for byte if that fails. A commit sha (7 to 40 hex characters) is written as its first 7, which is what `why` matches. Refused with the file untouched: no proof or more than one kind, a bad sha, a time that is not HH:MM, an empty field, a newline or the separator ` · ` in a field, a double quote in the words, an impossible date. `--dry-run` prints the line and writes nothing.

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `ships.py yes`: a publish yes is a DEVLOG line. `ships.py yes --project P --tag T --who NAME --time HH:MM --words W [--repo R] [--note N]` writes `- <date> · session: <id> · project: <P> · publish-yes <R> <T> · yes: <NAME> (<HH:MM> "<W>")[ · <N>]` under the anchor (`--repo` defaults to the project), refuses a second yes for the same repo and tag, and the reader never reads a yes line as a ship nor shows it in why.
+
 ## 0.5.0
 
 - `ships.py checkpoint` and `ships.py deviation` write the DEVLOG's two other line kinds under the one anchor, with proof (a commit sha, a ship version, or the user's words with who and time) and refuse a missing proof, bad sha or time, empty field, newline or " · " in a field, and a file with no anchor or two (file untouched). `why` finds a checkpoint by its commit sha. A work item's `devlog:` date that is not a real date (2026-02-31) no longer matches any DEVLOG line.

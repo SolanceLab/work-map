@@ -14,21 +14,26 @@ Where the line goes: directly under the file's one anchor line `<!-- work-map: n
 `# <project> DEVLOG`, a blank line, the anchor, then the line.
 The session id is --session or $WORK_MAP_SESSION, else "unknown". Python 3.9+, standard library only.
 
-ships.py checkpoint / deviation — the other two DEVLOG line kinds (the DEVLOG holds only checkpoints and approved deviations).
+ships.py checkpoint / deviation / yes — the other DEVLOG line kinds (the DEVLOG holds checkpoints, approved deviations and publish yeses).
 
   checkpoint --project P --text T (--commit SHA [--commit SHA2 ...] | --ship VERSION | --who NAME --time HH:MM --words W)
              [--date YYYY-MM-DD] [--session ID8] [--file F] [--config C] [--dry-run]
   deviation  --project P --step S --who NAME --time HH:MM --words W --what D --why Y
              [--date YYYY-MM-DD] [--session ID8] [--file F] [--config C] [--dry-run]
+  yes        --project P --tag T --who NAME --time HH:MM --words W [--repo R] [--note N]
+             [--date YYYY-MM-DD] [--session ID8] [--file F] [--config C] [--dry-run]
 
 Lines:
   - <date> · session: <id> · project: <P> · <T> · proof: commit <sha7>[, commit <sha7>] | ship <V> | <NAME> (<HH:MM> "<W>")
   - <date> · session: <id> · project: <P> · deviation: <S> · <NAME> (<HH:MM> "<W>") → <D> · Why: <Y>
+  - <date> · session: <id> · project: <P> · publish-yes <R> <T> · yes: <NAME> (<HH:MM> "<W>")[ · <N>]
 A checkpoint needs exactly one kind of proof (a SHA of 7 to 40 hex characters is written as its first 7). Every field must be
 non-empty, with no newline and no " · " inside (words also take no double quote). Same target file rules as add, but the file must
 already hold exactly one anchor: no anchor or two anchors is refused, file untouched. Only --file naming a path that does not
 exist yet creates a file (heading, blank line, anchor, line). The line goes directly under the anchor, is read back, and the
 original bytes are restored if anything fails. --dry-run prints the line and writes nothing.
+A yes needs --who, --time and --words; --project picks the file and fills project:, --repo (default: the project) names the repo;
+repo and tag are one word each; a second yes for the same repo and tag in the target file is refused, file untouched.
 """
 import argparse, datetime, glob, json, os, re, sys
 
@@ -38,6 +43,7 @@ from decisions import atomic_write, restore_original, default_config, ConfigRefu
 import work_map
 
 ANCHOR = "<!-- work-map: newest first -->"
+YES_RE = re.compile(r'^\s*-\s+\d{4}-\d{2}-\d{2} · session: [^·]+ · project: [^·]+ · publish-yes (\S+) (\S+) · yes: ')
 
 
 def config_ship_files(config):
@@ -225,8 +231,11 @@ def devlog_write(kind, argv):
         parser.add_argument("--text")
         parser.add_argument("--commit", action="append", default=[])
         parser.add_argument("--ship")
-    else:
+    elif kind == "deviation":
         for flag in ("step", "what", "why"):
+            parser.add_argument("--" + flag)
+    else:
+        for flag in ("repo", "tag", "note"):
             parser.add_argument("--" + flag)
     for flag in ("who", "time", "words"):
         parser.add_argument("--" + flag)
@@ -268,13 +277,25 @@ def devlog_write(kind, argv):
                 parser.error("a spoken proof needs --who, --time and --words")
             proof = _who_proof(parser, args.who, args.time, args.words)
         line = "%s%s · proof: %s" % (head, text, proof)
-    else:
+    elif kind == "deviation":
         step = _clean(parser, "step", args.step)
         what = _clean(parser, "what", args.what)
         why = _clean(parser, "why", args.why)
         if not (args.who and args.time and args.words):
             parser.error("a deviation needs --who, --time and --words")
         line = "%sdeviation: %s · %s → %s · Why: %s" % (head, step, _who_proof(parser, args.who, args.time, args.words), what, why)
+    else:
+        if not (args.who and args.time and args.words):
+            parser.error("a publish yes needs --who, --time and --words")
+        tag = _clean(parser, "tag", args.tag)
+        if re.search(r"\s", tag):
+            parser.error("tag must be one word")
+        repo = project if args.repo is None else _clean(parser, "repo", args.repo)
+        if re.search(r"\s", repo):
+            parser.error("repo must be one word (pass --repo when the project name has spaces)")
+        line = "%spublish-yes %s %s · yes: %s" % (head, repo, tag, _who_proof(parser, args.who, args.time, args.words))
+        if args.note is not None:
+            line += " · " + _clean(parser, "note", args.note)
     try:
         implicit = not args.file and not args.config
         if args.file:
@@ -308,6 +329,12 @@ def devlog_write(kind, argv):
                         target, "no anchor line" if not anchors else "%d anchor lines" % len(anchors), ANCHOR), file=sys.stderr)
                     return 2
                 anchor_at = anchors[0]
+                if kind == "yes":
+                    for n, old in enumerate(original.decode("utf-8").splitlines(), 1):
+                        m = YES_RE.search(old)
+                        if m and m.group(1) == repo and m.group(2) == tag:
+                            print("refused: %s %s already has a publish yes at %s:%d" % (repo, tag, target, n), file=sys.stderr)
+                            return 2
             elif creating:
                 anchor_at = 3
             else:
@@ -344,7 +371,7 @@ def devlog_write(kind, argv):
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
-    if argv and argv[0] in ("checkpoint", "deviation"):
+    if argv and argv[0] in ("checkpoint", "deviation", "yes"):
         return devlog_write(argv[0], argv[1:])
     if not argv or argv[0] != "add":
         print(__doc__)

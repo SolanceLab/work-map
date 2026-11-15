@@ -221,9 +221,19 @@ def config_workbench_limit(path):
     return v
 
 
+YES_LINE = re.compile(r'^\s*-\s+\d{4}-\d{2}-\d{2} · session: [^·]+ · project: [^·]+ · publish-yes \S+ \S+ · yes: ')
+
+
+def is_yes_line(text):
+    """A publish yes DEVLOG line (the yes record kind): an approval, never a ship and never shown by why."""
+    return bool(YES_LINE.search(text))
+
+
 def parse_ship(line, source):
     m = re.match(r"^\s*(?:-\s+)?(%s)\b(.*)$" % DATE, line)
     if not m or not re.search(r"(^|·)\s*shipped\b", m.group(2)):
+        return None
+    if is_yes_line(line):
         return None
     r = record("ship", "", source, date=m.group(1), status="shipped")
     decisions, tasks, repo, version, sha = [], [], "unknown", "", ""
@@ -816,7 +826,7 @@ def devlog_mentions(files, base, sha, limit=3):
         try:
             with open(os.path.join(base, f["file"]), encoding="utf-8", errors="replace") as fh:
                 for n, line in enumerate(fh, 1):
-                    if pat.search(line):
+                    if pat.search(line) and not is_yes_line(line):
                         hits.append(dict(source=f["file"], line=n, text=line.strip()[:300]))
                         if len(hits) >= limit:
                             return hits
@@ -857,7 +867,7 @@ def devlog_day_lines(files, base, source, day, limit=3):
                     if t.startswith("## "):
                         under = bool(head.match(t))
                         continue
-                    if t and (dated.match(t) or under):
+                    if t and (dated.match(t) or under) and not is_yes_line(t):
                         hits.append(dict(source=f["file"], line=n, text=t[:300]))
                         if len(hits) >= limit:
                             return hits

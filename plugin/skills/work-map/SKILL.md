@@ -56,13 +56,16 @@ Write a ship line (goes under the anchor line `<!-- work-map: newest first -->` 
 python3 ${CLAUDE_PLUGIN_ROOT}/scripts/ships.py add --project reports --version v0.4.0 --sha 9f3c2ab --decisions keep-csv-export --tasks t-14,t-15
 ```
 
-Write DEVLOG checkpoints and approved deviations only through `ships.py`, never by hand. The DEVLOG holds only things that happened, are true now and stay true, WITH proof, plus approved deviations. A checkpoint needs one kind of proof: a commit sha (so `why` can find it), a ship version, or the user's own words with who and time. The file must already have its one anchor; a refused write leaves it untouched:
+Write DEVLOG checkpoints, approved deviations and publish yeses only through `ships.py`, never by hand. The DEVLOG holds only things that happened, are true now and stay true, WITH proof, plus approved deviations. A checkpoint needs one kind of proof: a commit sha (so `why` can find it), a ship version, or the user's own words with who and time. A publish yes records the person's yes to publish one repo at one tag, once; why never shows it. The file must already have its one anchor; a refused write leaves it untouched:
 
 ```
 python3 ${CLAUDE_PLUGIN_ROOT}/scripts/ships.py checkpoint --project reports --text "CSV export verified on the live site" --commit 9f3c2ab
 python3 ${CLAUDE_PLUGIN_ROOT}/scripts/ships.py checkpoint --project reports --text "Weekly digest approved" --who Sam --time 14:05 --words "send it"
 python3 ${CLAUDE_PLUGIN_ROOT}/scripts/ships.py deviation --project reports --step "review before deploy" --who Sam --time 14:05 --words "skip it" --what "deployed without the second review" --why "hotfix for a broken login"
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/ships.py yes --project reports --tag v0.4.0 --who Sam --time 14:05 --words "yes, publish it"
 ```
+
+It writes `- <date> · session: <id> · project: reports · publish-yes reports v0.4.0 · yes: Sam (14:05 "yes, publish it")`.
 
 Tasks have no writer: write them by hand in the shape below.
 
