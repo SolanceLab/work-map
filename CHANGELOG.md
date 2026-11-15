@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.1
 
 - `ships.py yes`: a publish yes is a DEVLOG line. `ships.py yes --project P --tag T --who NAME --time HH:MM --words W [--repo R] [--note N]` writes `- <date> · session: <id> · project: <P> · publish-yes <R> <T> · yes: <NAME> (<HH:MM> "<W>")[ · <N>]` under the anchor (`--repo` defaults to the project), refuses a second yes for the same repo and tag, and the reader never reads a yes line as a ship nor shows it in why.
 
